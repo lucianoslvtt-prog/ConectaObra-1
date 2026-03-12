@@ -121,7 +121,7 @@ const Welcome = () => {
             >
                 <button
                     className="btn btn-primary w-full"
-                    onClick={() => navigate('/dashboard')}
+                    onClick={() => navigate('/auth')}
                     style={{ padding: '16px', fontSize: '16px', borderRadius: '14px' }}
                 >
                     {t('welcome_cta')} <ArrowRight size={20} />

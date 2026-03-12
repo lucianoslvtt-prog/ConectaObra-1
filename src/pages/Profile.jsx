@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings, LogOut, MapPin, Star, Briefcase, Camera, Edit2, ChevronRight, Image } from 'lucide-react';
+import { Settings, LogOut, MapPin, Star, Briefcase, Camera, Edit2, ChevronRight, Image, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { useLanguage } from '../lib/LanguageContext';
@@ -15,6 +15,7 @@ const Profile = () => {
     const [reviewCount, setReviewCount] = useState(0);
     const [avgRating, setAvgRating] = useState(null);
     const [userId, setUserId] = useState(null);
+    const [verificationStatus, setVerificationStatus] = useState(null);
     const avatarInputRef = useRef(null);
     const navigate = useNavigate();
     const { t } = useLanguage();
@@ -89,6 +90,16 @@ const Profile = () => {
                 setReviewCount(4);
                 setAvgRating('4.8');
             }
+
+            // Load verification status
+            try {
+                const { data: verif } = await supabase
+                    .from('identity_verifications')
+                    .select('status')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                if (verif) setVerificationStatus(verif.status);
+            } catch { /* ignore */ }
 
         } catch (e) {
             console.error(e);
@@ -288,6 +299,31 @@ const Profile = () => {
                         <span className="badge badge-blue" style={{ marginTop: '4px' }}>
                             {profile?.role === 'professional' ? `🔧 ${t('prof_professional')}` : `👤 ${t('prof_particular')}`}
                         </span>
+                        {profile?.role === 'professional' && (
+                            <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                padding: '4px 12px', borderRadius: '16px', marginTop: '8px',
+                                fontSize: '12px', fontWeight: '600',
+                                background: verificationStatus === 'approved'
+                                    ? 'rgba(34,197,94,0.15)'
+                                    : verificationStatus === 'pending'
+                                        ? 'rgba(245,158,11,0.15)'
+                                        : 'rgba(239,68,68,0.1)',
+                                color: verificationStatus === 'approved'
+                                    ? '#22c55e'
+                                    : verificationStatus === 'pending'
+                                        ? '#f59e0b'
+                                        : 'var(--text-muted)',
+                                border: `1px solid ${verificationStatus === 'approved'
+                                    ? 'rgba(34,197,94,0.3)'
+                                    : verificationStatus === 'pending'
+                                        ? 'rgba(245,158,11,0.3)'
+                                        : 'var(--border)'}`,
+                            }}>
+                                <Shield size={12} />
+                                {verificationStatus === 'approved' ? `✓ ${t('verify_badge')}` : verificationStatus === 'pending' ? `⏳ ${t('verify_pending')}` : t('verify_not')}
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -323,6 +359,7 @@ const Profile = () => {
                         { icon: Star, label: t('prof_reviews_menu'), desc: t('prof_reviews_desc'), path: '/my-reviews' },
                         { icon: Briefcase, label: t('prof_projects_menu'), desc: t('prof_projects_desc'), path: '/my-projects' },
                         ...(profile?.role === 'professional' ? [{ icon: Image, label: 'Mi Portfolio', desc: 'Gestiona y destaca tus imágenes', path: `/professional/${userId}/portfolio` }] : []),
+                        ...(profile?.role === 'professional' && verificationStatus !== 'approved' ? [{ icon: Shield, label: t('verify_menu'), desc: t('verify_menu_desc'), path: '/onboarding-pro' }] : []),
                     ].map((item, i) => (
                         <motion.div
                             key={i}

@@ -1,9 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Mail, User, Lock, ArrowRight, ChevronLeft, KeyRound } from 'lucide-react';
+import { Mail, User, Lock, ArrowRight, ChevronLeft, KeyRound, Phone, ChevronDown, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
+
+const phonePrefixes = [
+    { code: '+34', country: 'España', flag: '🇪🇸' },
+    { code: '+33', country: 'Francia', flag: '🇫🇷' },
+    { code: '+351', country: 'Portugal', flag: '🇵🇹' },
+    { code: '+44', country: 'Reino Unido', flag: '🇬🇧' },
+    { code: '+49', country: 'Alemania', flag: '🇩🇪' },
+    { code: '+39', country: 'Italia', flag: '🇮🇹' },
+    { code: '+1', country: 'EE.UU. / Canadá', flag: '🇺🇸' },
+    { code: '+52', country: 'México', flag: '🇲🇽' },
+    { code: '+54', country: 'Argentina', flag: '🇦🇷' },
+    { code: '+55', country: 'Brasil', flag: '🇧🇷' },
+    { code: '+56', country: 'Chile', flag: '🇨🇱' },
+    { code: '+57', country: 'Colombia', flag: '🇨🇴' },
+    { code: '+58', country: 'Venezuela', flag: '🇻🇪' },
+    { code: '+51', country: 'Perú', flag: '🇵🇪' },
+    { code: '+593', country: 'Ecuador', flag: '🇪🇨' },
+    { code: '+591', country: 'Bolivia', flag: '🇧🇴' },
+    { code: '+595', country: 'Paraguay', flag: '🇵🇾' },
+    { code: '+598', country: 'Uruguay', flag: '🇺🇾' },
+    { code: '+212', country: 'Marruecos', flag: '🇲🇦' },
+    { code: '+213', country: 'Argelia', flag: '🇩🇿' },
+    { code: '+40', country: 'Rumanía', flag: '🇷🇴' },
+    { code: '+380', country: 'Ucrania', flag: '🇺🇦' },
+    { code: '+48', country: 'Polonia', flag: '🇵🇱' },
+    { code: '+86', country: 'China', flag: '🇨🇳' },
+    { code: '+91', country: 'India', flag: '🇮🇳' },
+    { code: '+81', country: 'Japón', flag: '🇯🇵' },
+    { code: '+82', country: 'Corea del Sur', flag: '🇰🇷' },
+];
 
 const Auth = () => {
     const [mode, setMode] = useState('login');
@@ -13,9 +43,111 @@ const Auth = () => {
     const [role, setRole] = useState('user');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
+
+    // Phone auth state
+    const [phonePrefix, setPhonePrefix] = useState('+34');
+    const [phoneNumber, setPhoneNumber] = useState('');
+    const [showPrefixDropdown, setShowPrefixDropdown] = useState(false);
+    const [prefixSearch, setPrefixSearch] = useState('');
+    const [otpSent, setOtpSent] = useState(false);
+    const [otpCode, setOtpCode] = useState(['', '', '', '', '', '']);
+    const [phoneLoading, setPhoneLoading] = useState(false);
+    const otpRefs = useRef([]);
+
     const navigate = useNavigate();
     const { t } = useLanguage();
 
+    // ─── Social login ───
+    const handleGoogleLogin = async () => {
+        setLoading(true);
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: window.location.origin + '/dashboard',
+                },
+            });
+            if (error) throw error;
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message });
+            setLoading(false);
+        }
+    };
+
+    const handleAppleLogin = async () => {
+        setLoading(true);
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'apple',
+                options: {
+                    redirectTo: window.location.origin + '/dashboard',
+                },
+            });
+            if (error) throw error;
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message });
+            setLoading(false);
+        }
+    };
+
+    // ─── Phone login ───
+    const handleSendOtp = async () => {
+        const fullPhone = phonePrefix + phoneNumber.replace(/\s/g, '');
+        if (!phoneNumber.trim()) return;
+        setPhoneLoading(true);
+        setMessage({ type: '', text: '' });
+        try {
+            const { error } = await supabase.auth.signInWithOtp({
+                phone: fullPhone,
+            });
+            if (error) throw error;
+            setOtpSent(true);
+            setMessage({ type: 'success', text: t('auth_phone_sent') });
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message || t('auth_phone_error') });
+        } finally {
+            setPhoneLoading(false);
+        }
+    };
+
+    const handleVerifyOtp = async () => {
+        const code = otpCode.join('');
+        if (code.length !== 6) return;
+        const fullPhone = phonePrefix + phoneNumber.replace(/\s/g, '');
+        setPhoneLoading(true);
+        try {
+            const { data, error } = await supabase.auth.verifyOtp({
+                phone: fullPhone,
+                token: code,
+                type: 'sms',
+            });
+            if (error) throw error;
+            if (data.session) navigate('/dashboard');
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message });
+        } finally {
+            setPhoneLoading(false);
+        }
+    };
+
+    const handleOtpChange = (index, value) => {
+        if (value.length > 1) value = value[0];
+        if (!/^\d*$/.test(value)) return;
+        const newOtp = [...otpCode];
+        newOtp[index] = value;
+        setOtpCode(newOtp);
+        if (value && index < 5) {
+            otpRefs.current[index + 1]?.focus();
+        }
+    };
+
+    const handleOtpKeyDown = (index, e) => {
+        if (e.key === 'Backspace' && !otpCode[index] && index > 0) {
+            otpRefs.current[index - 1]?.focus();
+        }
+    };
+
+    // ─── Email auth ───
     const handleAuth = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -23,7 +155,6 @@ const Auth = () => {
 
         try {
             if (mode === 'register') {
-                // Check if username is already taken
                 const { data: existingUser } = await supabase
                     .from('profiles')
                     .select('id')
@@ -45,13 +176,11 @@ const Auth = () => {
                 });
                 if (error) throw error;
 
-                // If we got a session directly, navigate
                 if (data.session) {
                     navigate(role === 'professional' ? '/onboarding-pro' : '/dashboard');
                     return;
                 }
 
-                // Otherwise try auto-login immediately
                 const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
                 if (loginError) {
                     setMessage({ type: 'success', text: '¡Cuenta creada! Revisa tu email para confirmar tu cuenta.' });
@@ -92,7 +221,14 @@ const Auth = () => {
         }
     };
 
-    // Forgot password screen
+    const filteredPrefixes = phonePrefixes.filter(p =>
+        p.country.toLowerCase().includes(prefixSearch.toLowerCase()) ||
+        p.code.includes(prefixSearch)
+    );
+
+    const selectedPrefix = phonePrefixes.find(p => p.code === phonePrefix) || phonePrefixes[0];
+
+    // ─── Forgot password screen ───
     if (mode === 'forgot') {
         return (
             <div style={{
@@ -194,6 +330,7 @@ const Auth = () => {
         );
     }
 
+    // ─── Main auth screen ───
     return (
         <div style={{
             minHeight: '100vh',
@@ -216,28 +353,258 @@ const Auth = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4 }}
             >
-                <h1 style={{ fontSize: '28px', fontWeight: '800', marginBottom: '4px' }}>
-                    {mode === 'register' ? 'Bienvenido' : 'Bienvenido'}
+                <h1 style={{ fontSize: '28px', fontWeight: '800', marginBottom: '8px' }}>
+                    {mode === 'register' ? t('auth_register_title') : t('auth_login_title')}
                 </h1>
-
-
-
+                <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '28px' }}>
+                    {mode === 'register' ? t('auth_switch_login') : t('auth_switch_register')}
+                </p>
 
                 {/* Message */}
                 {message.text && (
-                    <div style={{
-                        padding: '12px 16px',
-                        borderRadius: 'var(--radius-sm)',
-                        marginBottom: '20px',
-                        fontSize: '14px',
-                        background: message.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
-                        color: message.type === 'error' ? '#f87171' : '#4ade80',
-                        border: `1px solid ${message.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`
-                    }}>
+                    <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        style={{
+                            padding: '12px 16px',
+                            borderRadius: 'var(--radius-sm)',
+                            marginBottom: '20px',
+                            fontSize: '14px',
+                            background: message.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+                            color: message.type === 'error' ? '#f87171' : '#4ade80',
+                            border: `1px solid ${message.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`
+                        }}
+                    >
                         {message.text}
+                    </motion.div>
+                )}
+
+                {/* ── Social login buttons ── */}
+                {mode !== 'register' && (
+                    <div style={{ marginBottom: '24px' }}>
+                        <button
+                            onClick={handleGoogleLogin}
+                            disabled={loading}
+                            style={{
+                                width: '100%',
+                                padding: '14px 20px',
+                                borderRadius: 'var(--radius)',
+                                border: '1px solid var(--border)',
+                                background: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)',
+                                fontSize: '15px',
+                                fontWeight: '600',
+                                fontFamily: 'Inter, sans-serif',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '12px',
+                                marginBottom: '10px',
+                                transition: 'var(--transition)',
+                            }}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24">
+                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+                                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                            </svg>
+                            {t('auth_social_google')}
+                        </button>
+
+                        <button
+                            onClick={handleAppleLogin}
+                            disabled={loading}
+                            style={{
+                                width: '100%',
+                                padding: '14px 20px',
+                                borderRadius: 'var(--radius)',
+                                border: '1px solid var(--border)',
+                                background: '#000',
+                                color: '#fff',
+                                fontSize: '15px',
+                                fontWeight: '600',
+                                fontFamily: 'Inter, sans-serif',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '12px',
+                                marginBottom: '10px',
+                                transition: 'var(--transition)',
+                            }}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                                <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+                            </svg>
+                            {t('auth_social_apple')}
+                        </button>
+
+                        {/* ── Phone login ── */}
+                        <div className="card" style={{ padding: '16px', marginTop: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                <Phone size={18} color="var(--accent)" />
+                                <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)' }}>
+                                    {t('auth_phone_title')}
+                                </span>
+                            </div>
+
+                            {!otpSent ? (
+                                <>
+                                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                                        {/* Country prefix selector */}
+                                        <div style={{ position: 'relative' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPrefixDropdown(!showPrefixDropdown)}
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: '6px',
+                                                    padding: '12px', borderRadius: 'var(--radius-sm)',
+                                                    border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                                    cursor: 'pointer', fontSize: '14px', fontFamily: 'Inter',
+                                                    color: 'var(--text-primary)', whiteSpace: 'nowrap',
+                                                    minWidth: '90px',
+                                                }}
+                                            >
+                                                <span>{selectedPrefix.flag}</span>
+                                                <span>{phonePrefix}</span>
+                                                <ChevronDown size={14} color="var(--text-muted)" />
+                                            </button>
+
+                                            {showPrefixDropdown && (
+                                                <div style={{
+                                                    position: 'absolute', top: '100%', left: 0,
+                                                    marginTop: '4px', width: '260px', maxHeight: '240px',
+                                                    overflowY: 'auto', background: 'var(--bg-secondary)',
+                                                    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                                                    zIndex: 100, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                                                }}>
+                                                    <div style={{ padding: '8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--bg-secondary)' }}>
+                                                        <div style={{ position: 'relative' }}>
+                                                            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                                                            <input
+                                                                placeholder={t('search_country')}
+                                                                value={prefixSearch}
+                                                                onChange={(e) => setPrefixSearch(e.target.value)}
+                                                                style={{ paddingLeft: '32px', fontSize: '13px', padding: '8px 10px 8px 32px' }}
+                                                                autoFocus
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    {filteredPrefixes.map(p => (
+                                                        <button
+                                                            key={p.code + p.country}
+                                                            onClick={() => {
+                                                                setPhonePrefix(p.code);
+                                                                setShowPrefixDropdown(false);
+                                                                setPrefixSearch('');
+                                                            }}
+                                                            style={{
+                                                                display: 'flex', alignItems: 'center', gap: '10px',
+                                                                width: '100%', padding: '10px 12px', background: 'transparent',
+                                                                border: 'none', borderBottom: '1px solid var(--border)',
+                                                                color: 'var(--text-primary)', fontSize: '13px',
+                                                                cursor: 'pointer', fontFamily: 'Inter', textAlign: 'left',
+                                                            }}
+                                                        >
+                                                            <span>{p.flag}</span>
+                                                            <span style={{ flex: 1 }}>{p.country}</span>
+                                                            <span style={{ color: 'var(--text-muted)' }}>{p.code}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Phone number input */}
+                                        <input
+                                            type="tel"
+                                            value={phoneNumber}
+                                            onChange={(e) => setPhoneNumber(e.target.value)}
+                                            placeholder={t('auth_phone_placeholder')}
+                                            style={{ flex: 1 }}
+                                        />
+                                    </div>
+
+                                    <button
+                                        onClick={handleSendOtp}
+                                        disabled={phoneLoading || !phoneNumber.trim()}
+                                        className="btn btn-primary w-full"
+                                        style={{ padding: '12px', fontSize: '14px', opacity: !phoneNumber.trim() ? 0.5 : 1 }}
+                                    >
+                                        {phoneLoading ? '...' : t('auth_phone_send')}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', textAlign: 'center' }}>
+                                        {t('auth_phone_sent')} {phonePrefix}{phoneNumber}
+                                    </p>
+
+                                    {/* OTP input */}
+                                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
+                                        {otpCode.map((digit, i) => (
+                                            <input
+                                                key={i}
+                                                ref={el => otpRefs.current[i] = el}
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={1}
+                                                value={digit}
+                                                onChange={(e) => handleOtpChange(i, e.target.value)}
+                                                onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                                                style={{
+                                                    width: '44px', height: '52px', textAlign: 'center',
+                                                    fontSize: '20px', fontWeight: '700',
+                                                    borderRadius: 'var(--radius-sm)',
+                                                    border: digit ? '2px solid var(--accent)' : '1px solid var(--border)',
+                                                    background: 'var(--bg-secondary)',
+                                                    color: 'var(--text-primary)',
+                                                    padding: 0,
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        onClick={handleVerifyOtp}
+                                        disabled={phoneLoading || otpCode.join('').length !== 6}
+                                        className="btn btn-primary w-full"
+                                        style={{ padding: '12px', fontSize: '14px', marginBottom: '8px' }}
+                                    >
+                                        {phoneLoading ? '...' : t('auth_phone_verify')}
+                                    </button>
+
+                                    <button
+                                        onClick={() => { setOtpSent(false); setOtpCode(['', '', '', '', '', '']); setMessage({ type: '', text: '' }); }}
+                                        style={{
+                                            width: '100%', padding: '8px', background: 'none',
+                                            border: 'none', color: 'var(--text-muted)', fontSize: '13px',
+                                            cursor: 'pointer', fontFamily: 'Inter',
+                                        }}
+                                    >
+                                        ← {t('back')}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Divider */}
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: '16px',
+                            margin: '24px 0',
+                        }}>
+                            <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                {t('auth_or_email')}
+                            </span>
+                            <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                        </div>
                     </div>
                 )}
 
+                {/* ── Email/Password form ── */}
                 <form onSubmit={handleAuth}>
                     {/* Email */}
                     <div style={{ marginBottom: '16px' }}>
@@ -364,8 +731,23 @@ const Auth = () => {
                         <ArrowRight size={18} />
                     </button>
                 </form>
+
+                {/* Switch login/register */}
+                <div style={{ textAlign: 'center', marginTop: '20px' }}>
+                    <button
+                        onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setMessage({ type: '', text: '' }); }}
+                        style={{
+                            background: 'none', border: 'none',
+                            color: 'var(--accent)', fontSize: '14px',
+                            fontWeight: '600', cursor: 'pointer',
+                            fontFamily: 'Inter, sans-serif',
+                        }}
+                    >
+                        {mode === 'login' ? t('auth_switch_register') : t('auth_switch_login')}
+                    </button>
+                </div>
             </motion.div>
-        </div >
+        </div>
     );
 };
 

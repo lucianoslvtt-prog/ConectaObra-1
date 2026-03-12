@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, MapPin, Star, Briefcase, Clock, Phone, Mail, MessageSquare, Heart, X, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin, Star, Briefcase, Clock, Phone, Mail, MessageSquare, Heart, X, Send, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
 import { trades } from '../data/categories';
@@ -43,6 +43,7 @@ const ProfessionalProfile = () => {
     const [dbProfile, setDbProfile] = useState(null);
     const [dbProData, setDbProData] = useState(null);
     const [portfolioImages, setPortfolioImages] = useState([]);
+    const [verificationStatus, setVerificationStatus] = useState(null);
     const { t } = useLanguage();
 
     // Load favorite state
@@ -101,6 +102,16 @@ const ProfessionalProfile = () => {
                 if (images) {
                     setPortfolioImages(images);
                 }
+
+                // Load verification status
+                try {
+                    const { data: verif } = await supabase
+                        .from('identity_verifications')
+                        .select('status')
+                        .eq('user_id', id)
+                        .maybeSingle();
+                    if (verif) setVerificationStatus(verif.status);
+                } catch { /* ignore */ }
             } catch { /* ignore */ }
         };
         load();
@@ -304,6 +315,19 @@ const ProfessionalProfile = () => {
                     <span className={`badge ${pro.role === 'professional' ? 'badge-blue' : 'badge-green'}`} style={{ marginBottom: '6px', display: 'inline-block' }}>
                         {pro.role === 'professional' ? `🔧 ${t('prof_professional')}` : `👤 ${t('prof_particular')}`}
                     </span>
+                    {verificationStatus === 'approved' && (
+                        <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '4px',
+                            padding: '4px 12px', borderRadius: '16px', marginLeft: '6px',
+                            fontSize: '12px', fontWeight: '600',
+                            background: 'rgba(34,197,94,0.15)',
+                            color: '#22c55e',
+                            border: '1px solid rgba(34,197,94,0.3)',
+                        }}>
+                            <Shield size={12} />
+                            ✓ {t('verify_badge')}
+                        </span>
+                    )}
                     {pro.location && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
                             <MapPin size={13} /> {pro.location}

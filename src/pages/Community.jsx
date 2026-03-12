@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, MessageCircle, Share2, Image, Send, MoreHorizontal, Bell, Reply, X, Plus, Camera, Video } from 'lucide-react';
+import { Image, Send, MoreHorizontal, Bell, Reply, X, Plus, Camera, Video } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { trades } from '../data/categories';
@@ -896,23 +896,7 @@ const Community = () => {
                             )}
 
                             {/* Actions */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-                                <button
-                                    onClick={() => toggleLike(post.id)}
-                                    style={{
-                                        display: 'flex', alignItems: 'center', gap: '6px',
-                                        background: 'none', border: 'none', cursor: 'pointer',
-                                        color: likedPosts.has(post.id) ? '#ef4444' : 'var(--text-muted)',
-                                        fontSize: '13px', fontFamily: 'Inter',
-                                        transition: 'var(--transition)'
-                                    }}
-                                >
-                                    <Heart size={16} fill={likedPosts.has(post.id) ? '#ef4444' : 'transparent'} />
-                                    {post.likes}
-                                </button>
-                                <button style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '13px', fontFamily: 'Inter' }}>
-                                    <MessageCircle size={16} /> {post.comments}
-                                </button>
+                            <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
                                 <button
                                     onClick={async () => {
                                         try {

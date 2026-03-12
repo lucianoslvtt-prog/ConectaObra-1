@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight, ChevronDown, Camera, Check, CreditCard, Store, Hammer, Droplets, TreePine, Square, Zap, Paintbrush, CircleDot, MapPin, Globe, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Camera, Check, CreditCard, Store, Hammer, Droplets, TreePine, Square, Zap, Paintbrush, CircleDot, MapPin, Globe, X, Shield, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { spanishLocations } from '../data/locations';
 import { tradeGroups } from '../data/categories';
@@ -153,7 +153,12 @@ const OnboardingPro = () => {
     const [avatarFile, setAvatarFile] = useState(null);
     const [avatarPreview, setAvatarPreview] = useState(null);
     const [activeZoneIndex, setActiveZoneIndex] = useState(null);
+    const [dniFile, setDniFile] = useState(null);
+    const [dniPreview, setDniPreview] = useState(null);
+    const [dniUploading, setDniUploading] = useState(false);
+    const [dniUploaded, setDniUploaded] = useState(false);
     const avatarInputRef = useRef(null);
+    const dniInputRef = useRef(null);
     const navigate = useNavigate();
 
     // Preload existing profile data if editing
@@ -800,6 +805,187 @@ const OnboardingPro = () => {
                         </div>
                     </motion.div>
                 );
+
+            case 5:
+                return (
+                    <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                        <div style={{
+                            width: '64px', height: '64px', borderRadius: '16px',
+                            background: 'var(--accent-soft)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <Shield size={28} color="var(--accent)" />
+                        </div>
+
+                        <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{t('verify_title')}</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '28px', lineHeight: 1.5 }}>
+                            {t('verify_desc')}
+                        </p>
+
+                        <input
+                            ref={dniInputRef}
+                            type="file"
+                            accept="image/*,application/pdf"
+                            onChange={(e) => {
+                                const file = e.target.files[0];
+                                if (!file) return;
+                                setDniFile(file);
+                                if (file.type.startsWith('image/')) {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => setDniPreview(reader.result);
+                                    reader.readAsDataURL(file);
+                                } else {
+                                    setDniPreview(null);
+                                }
+                                e.target.value = '';
+                            }}
+                            style={{ display: 'none' }}
+                        />
+
+                        {!dniFile && !dniUploaded && (
+                            <motion.button
+                                whileTap={{ scale: 0.97 }}
+                                onClick={() => dniInputRef.current?.click()}
+                                className="card"
+                                style={{
+                                    width: '100%',
+                                    padding: '40px 20px',
+                                    display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', gap: '12px',
+                                    cursor: 'pointer',
+                                    border: '2px dashed var(--border)',
+                                    background: 'var(--bg-secondary)',
+                                    transition: 'var(--transition)',
+                                }}
+                            >
+                                <div style={{
+                                    width: '56px', height: '56px', borderRadius: '50%',
+                                    background: 'var(--accent-soft)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                    <Upload size={24} color="var(--accent)" />
+                                </div>
+                                <p style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                                    {t('verify_upload')}
+                                </p>
+                                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                    JPG, PNG, PDF
+                                </p>
+                            </motion.button>
+                        )}
+
+                        {dniFile && !dniUploaded && (
+                            <div className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                                {dniPreview && (
+                                    <img
+                                        src={dniPreview}
+                                        alt="DNI Preview"
+                                        style={{
+                                            width: '100%', maxHeight: '200px',
+                                            objectFit: 'contain',
+                                            borderRadius: 'var(--radius-sm)',
+                                            marginBottom: '12px',
+                                            border: '1px solid var(--border)',
+                                        }}
+                                    />
+                                )}
+                                {!dniPreview && (
+                                    <div style={{
+                                        padding: '20px',
+                                        background: 'var(--bg-secondary)',
+                                        borderRadius: 'var(--radius-sm)',
+                                        marginBottom: '12px',
+                                    }}>
+                                        <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>📄 {dniFile.name}</p>
+                                    </div>
+                                )}
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button
+                                        onClick={() => { setDniFile(null); setDniPreview(null); }}
+                                        className="btn"
+                                        style={{
+                                            flex: 1, padding: '10px', fontSize: '13px',
+                                            background: 'var(--bg-secondary)',
+                                            border: '1px solid var(--border)',
+                                            color: 'var(--text-secondary)',
+                                        }}
+                                    >
+                                        {t('cancel')}
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            setDniUploading(true);
+                                            try {
+                                                const { data: { user } } = await supabase.auth.getUser();
+                                                if (!user) return;
+                                                const ext = dniFile.name.split('.').pop();
+                                                const fileName = `${user.id}/dni_${Date.now()}.${ext}`;
+                                                const { error: uploadErr } = await supabase.storage
+                                                    .from('identity-documents')
+                                                    .upload(fileName, dniFile, { cacheControl: '3600', upsert: true });
+                                                if (uploadErr) throw uploadErr;
+
+                                                // Create signed URL (private bucket)
+                                                const { data: signedData } = await supabase.storage
+                                                    .from('identity-documents')
+                                                    .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 year
+
+                                                const docUrl = signedData?.signedUrl || fileName;
+
+                                                // Upsert verification record
+                                                const { error: dbErr } = await supabase
+                                                    .from('identity_verifications')
+                                                    .upsert({
+                                                        user_id: user.id,
+                                                        document_url: docUrl,
+                                                        status: 'pending',
+                                                        submitted_at: new Date().toISOString(),
+                                                    }, { onConflict: 'user_id' });
+                                                if (dbErr) throw dbErr;
+
+                                                setDniUploaded(true);
+                                            } catch (err) {
+                                                console.error('DNI upload error:', err);
+                                                alert(err.message || 'Error uploading document');
+                                            } finally {
+                                                setDniUploading(false);
+                                            }
+                                        }}
+                                        disabled={dniUploading}
+                                        className="btn btn-primary"
+                                        style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                                    >
+                                        {dniUploading ? t('verify_uploading') : t('verify_upload')}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {dniUploaded && (
+                            <div className="card" style={{
+                                padding: '24px', textAlign: 'center',
+                                border: '2px solid rgba(34,197,94,0.4)',
+                                background: 'rgba(34,197,94,0.08)',
+                            }}>
+                                <div style={{
+                                    width: '56px', height: '56px', borderRadius: '50%',
+                                    background: 'rgba(34,197,94,0.2)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    margin: '0 auto 12px',
+                                }}>
+                                    <Check size={28} color="#22c55e" />
+                                </div>
+                                <p style={{ fontSize: '15px', fontWeight: '700', color: '#22c55e', marginBottom: '8px' }}>
+                                    {t('verify_pending')}
+                                </p>
+                                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                    {t('verify_success')}
+                                </p>
+                            </div>
+                        )}
+                    </motion.div>
+                );
         }
     };
 
@@ -811,7 +997,7 @@ const OnboardingPro = () => {
                     <ChevronLeft size={22} />
                 </button>
                 <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: '500' }}>
-                    {step} de 4
+                    {step} de 5
                 </span>
             </div>
 
@@ -819,7 +1005,7 @@ const OnboardingPro = () => {
             <div style={{ height: '3px', background: 'var(--bg-card)', borderRadius: '2px', marginBottom: '32px' }}>
                 <div style={{
                     height: '100%',
-                    width: `${(step / 4) * 100}%`,
+                    width: `${(step / 5) * 100}%`,
                     background: 'var(--accent)',
                     borderRadius: '2px',
                     transition: 'width 0.4s ease'
@@ -854,16 +1040,21 @@ const OnboardingPro = () => {
                             }
                             setLoading(false);
                             setStep(step + 1);
-                        } else if (step < 4) {
+                        } else if (step === 4) {
+                            // After subscription step, go submit then DNI
+                            await handleSubmit();
+                            setStep(5);
+                        } else if (step < 5) {
                             setStep(step + 1);
                         } else {
-                            handleSubmit();
+                            // Step 5 done → go to dashboard
+                            navigate('/dashboard');
                         }
                     }}
                     disabled={loading || (step === 1 && !fullName.trim())}
                     style={{ padding: '16px', fontSize: '15px' }}
                 >
-                    {step === 4 ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita') : 'Continuar'}
+                    {step === 4 ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita') : step === 5 ? (dniUploaded ? t('onb_next') : t('verify_skip')) : t('onb_next')}
                     <ChevronRight size={18} />
                 </button>
             </div>
