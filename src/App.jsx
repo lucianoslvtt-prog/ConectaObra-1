@@ -32,7 +32,7 @@ function App() {
             const userParam = params.get('user');
 
             const accounts = {
-                '1': { email: 'lucianose21@gmail.com', password: 'luciano' },
+                '1': { email: 'lucianotest10@gmail.com', password: 'luciano' },
                 '2': { email: 'lucianoslvtt@gmail.com', password: 'luciano' }
             };
 
