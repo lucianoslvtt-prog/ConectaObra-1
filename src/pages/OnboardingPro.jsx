@@ -1222,8 +1222,33 @@ const OnboardingPro = () => {
                             setLoading(false);
                             setStep(step + 1);
                         } else if (currentStepId === 'subscription') {
-                            await handleSubmit();
-                            setStep(step + 1);
+                            setLoading(true);
+                            try {
+                                await handleSubmit();
+                                // Redirect to Stripe Checkout
+                                const { data: { user } } = await supabase.auth.getUser();
+                                const response = await fetch('/api/create-checkout-session', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        email: user?.email,
+                                        userId: user?.id,
+                                    }),
+                                });
+                                const data = await response.json();
+                                if (data.url) {
+                                    window.location.href = data.url;
+                                    return;
+                                } else {
+                                    throw new Error(data.error || 'Error al crear la sesión de pago');
+                                }
+                            } catch (error) {
+                                console.error('Error:', error);
+                                // If Stripe fails, still go to dashboard
+                                navigate('/dashboard');
+                            } finally {
+                                setLoading(false);
+                            }
                         } else if (currentStepId === 'verification') {
                             navigate('/dashboard');
                         } else {
