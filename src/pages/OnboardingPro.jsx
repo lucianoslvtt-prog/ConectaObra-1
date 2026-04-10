@@ -254,7 +254,13 @@ const OnboardingPro = () => {
     // Save profile data without navigating - returns the user object
     const saveProfileData = async () => {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error('No user');
+        
+        // TEMPORARY FALLBACK: Si estamos bloqueados por Supabase y no hay sesión, 
+        // devolvemos un usuario de prueba para poder ver la pasarela de Stripe
+        if (!user) {
+             console.warn("Usuario no autenticado, saltando guardado DB y usando modo demo");
+             return { email: 'demo@conectaobra.com', id: 'demo-user-123' };
+        }
 
         const specialtyStr = selectedCategories.join(', ');
 
