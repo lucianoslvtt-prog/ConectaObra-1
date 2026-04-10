@@ -20,21 +20,41 @@ import MyReviews from './pages/MyReviews';
 import SearchResults from './pages/SearchResults';
 import PortfolioGallery from './pages/PortfolioGallery';
 import ResetPassword from './pages/ResetPassword';
+import VerifyIdentity from './pages/VerifyIdentity';
 
 function App() {
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
         const init = async () => {
-            // Check if already logged in
+            // Determine which dev account to use via ?user= query param
+            const params = new URLSearchParams(window.location.search);
+            const userParam = params.get('user');
+
+            const accounts = {
+                '1': { email: 'lucianose21@gmail.com', password: 'luciano' },
+                '2': { email: 'lucianoslvtt@gmail.com', password: 'luciano' }
+            };
+
+            const account = accounts[userParam] || accounts['1'];
+
+            // Check current session
             const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                // Auto-login with dev account
+
+            // If logged in as a different user than requested, sign out first
+            if (session && session.user.email !== account.email) {
+                await supabase.auth.signOut();
+            }
+
+            // Sign in if not already logged in as the correct user
+            const { data: { session: currentSession } } = await supabase.auth.getSession();
+            if (!currentSession) {
                 await supabase.auth.signInWithPassword({
-                    email: 'lucianose21@gmail.com',
-                    password: 'luciano'
+                    email: account.email,
+                    password: account.password
                 });
             }
+
             setReady(true);
         };
         init();
@@ -79,6 +99,7 @@ function App() {
                 <Route path="/my-projects" element={<MyProjects />} />
                 <Route path="/my-reviews" element={<MyReviews />} />
                 <Route path="/search" element={<SearchResults />} />
+                <Route path="/verify-identity" element={<VerifyIdentity />} />
             </Routes>
         </Router>
     );

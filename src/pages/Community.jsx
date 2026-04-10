@@ -70,6 +70,7 @@ const Community = () => {
     const [imagePreviews, setImagePreviews] = useState([]);
     const [selectedVideo, setSelectedVideo] = useState(null);
     const [videoPreview, setVideoPreview] = useState(null);
+    const [toastMsg, setToastMsg] = useState('');
     const textareaRef = useRef(null);
     const fileInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -294,7 +295,8 @@ const Community = () => {
         setPublishing(true);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
             if (!user) return;
 
             // Get username
@@ -440,9 +442,37 @@ const Community = () => {
         });
     };
 
+    const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(''), 3000);
+    };
+
     return (
         <div className="page">
             <div className="page-content">
+                {/* Toast notification */}
+                <AnimatePresence>
+                    {toastMsg && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            style={{
+                                position: 'fixed', top: '20px', left: '20px', right: '20px',
+                                zIndex: 1000, padding: '14px 18px',
+                                background: 'rgba(37, 99, 235, 0.95)',
+                                color: 'white', borderRadius: '12px',
+                                fontSize: '14px', fontWeight: '600',
+                                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                                backdropFilter: 'blur(8px)',
+                                textAlign: 'center'
+                            }}
+                        >
+                            {toastMsg}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 {/* Header */}
                 <div style={{ padding: '20px 20px 0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -896,21 +926,82 @@ const Community = () => {
                             )}
 
                             {/* Actions */}
-                            <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                                {/* Like button */}
+                                <button
+                                    onClick={() => toggleLike(post.id)}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: '6px',
+                                        background: 'none', border: 'none',
+                                        cursor: 'pointer',
+                                        color: likedPosts.has(post.id) ? '#ef4444' : 'var(--text-muted)',
+                                        fontSize: '13px', fontFamily: 'Inter', fontWeight: '600',
+                                        padding: '4px 0',
+                                        transition: 'color 0.2s',
+                                    }}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill={likedPosts.has(post.id) ? '#ef4444' : 'none'} stroke={likedPosts.has(post.id) ? '#ef4444' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                                    </svg>
+                                    {post.likes}
+                                </button>
+                                {/* Comment count */}
+                                <div
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: '6px',
+                                        color: 'var(--text-muted)',
+                                        fontSize: '13px', fontWeight: '600',
+                                    }}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                    </svg>
+                                    {post.comments}
+                                </div>
+                                {/* Reply privately button */}
                                 <button
                                     onClick={async () => {
                                         try {
-                                            const { data: { user } } = await supabase.auth.getUser();
-                                            if (!user) return;
-                                            // Create or find conversation
-                                            const postUserId = post.user_id || 'sample-user';
-                                            if (postUserId === user.id || postUserId === 'sample-user') {
-                                                // For demo: create a conversation with a fake user
-                                                const { data: conv, error } = await supabase
+                                            const { data: { session } } = await supabase.auth.getSession();
+                                            const user = session?.user;
+                                            if (!user) {
+                                                showToast('Debes iniciar sesión para responder.');
+                                                return;
+                                            }
+                                            const postUserId = post.user_id;
+
+                                            if (!postUserId) {
+                                                // Sample post — show feedback
+                                                showToast('Este es un post de ejemplo. Solo puedes responder a publicaciones reales de otros usuarios.');
+                                                return;
+                                            }
+
+                                            if (postUserId === user.id) {
+                                                showToast('No puedes responderte a ti mismo.');
+                                                return;
+                                            }
+
+                                            // Check for existing conversation between these two users
+                                            const { data: existing, error: findErr } = await supabase
+                                                .from('conversations')
+                                                .select('id')
+                                                .or(`and(participant_1.eq.${user.id},participant_2.eq.${postUserId}),and(participant_1.eq.${postUserId},participant_2.eq.${user.id})`)
+                                                .maybeSingle();
+
+                                            if (findErr) {
+                                                console.error('Error finding conversation:', findErr);
+                                                showToast('Error al buscar conversación. Inténtalo de nuevo.');
+                                                return;
+                                            }
+
+                                            if (existing) {
+                                                navigate(`/chat/${existing.id}`);
+                                            } else {
+                                                const { data: conv, error: createErr } = await supabase
                                                     .from('conversations')
                                                     .insert({
                                                         participant_1: user.id,
-                                                        participant_2: user.id,
+                                                        participant_2: postUserId,
                                                         original_post_content: post.content.slice(0, 200),
                                                         poster_name: post.user,
                                                         last_message: t('chat_reply_label'),
@@ -918,8 +1009,14 @@ const Community = () => {
                                                     })
                                                     .select()
                                                     .single();
+
+                                                if (createErr) {
+                                                    console.error('Error creating conversation:', createErr);
+                                                    showToast('Error al crear conversación. Inténtalo de nuevo.');
+                                                    return;
+                                                }
+
                                                 if (conv) {
-                                                    // Send initial message
                                                     await supabase.from('messages').insert({
                                                         conversation_id: conv.id,
                                                         sender_id: user.id,
@@ -927,39 +1024,11 @@ const Community = () => {
                                                     });
                                                     navigate(`/chat/${conv.id}`);
                                                 }
-                                            } else {
-                                                // Real user: check for existing conversation
-                                                const { data: existing } = await supabase
-                                                    .from('conversations')
-                                                    .select('id')
-                                                    .or(`and(participant_1.eq.${user.id},participant_2.eq.${postUserId}),and(participant_1.eq.${postUserId},participant_2.eq.${user.id})`)
-                                                    .maybeSingle();
-                                                if (existing) {
-                                                    navigate(`/chat/${existing.id}`);
-                                                } else {
-                                                    const { data: conv } = await supabase
-                                                        .from('conversations')
-                                                        .insert({
-                                                            participant_1: user.id,
-                                                            participant_2: postUserId,
-                                                            original_post_content: post.content.slice(0, 200),
-                                                            poster_name: post.user,
-                                                            last_message: t('chat_reply_label'),
-                                                            last_message_at: new Date().toISOString()
-                                                        })
-                                                        .select()
-                                                        .single();
-                                                    if (conv) {
-                                                        await supabase.from('messages').insert({
-                                                            conversation_id: conv.id,
-                                                            sender_id: user.id,
-                                                            content: `${t('chat_auto_msg')} "${post.content.slice(0, 100)}..."`
-                                                        });
-                                                        navigate(`/chat/${conv.id}`);
-                                                    }
-                                                }
                                             }
-                                        } catch (e) { console.error(e); }
+                                        } catch (e) {
+                                            console.error(e);
+                                            showToast('Error inesperado. Inténtalo de nuevo.');
+                                        }
                                     }}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: '6px',

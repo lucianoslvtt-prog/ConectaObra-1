@@ -157,6 +157,14 @@ const OnboardingPro = () => {
     const [dniPreview, setDniPreview] = useState(null);
     const [dniUploading, setDniUploading] = useState(false);
     const [dniUploaded, setDniUploaded] = useState(false);
+    const [storeAddress, setStoreAddress] = useState(''); // physical address for stores
+    const [businessHours, setBusinessHours] = useState('');
+    const [storeImageFile, setStoreImageFile] = useState(null);
+    const [storeImagePreview, setStoreImagePreview] = useState(null);
+    const [deliveryAvailable, setDeliveryAvailable] = useState(false);
+    const [website, setWebsite] = useState('');
+    const [taxId, setTaxId] = useState('');
+    const storeImageInputRef = useRef(null);
     const avatarInputRef = useRef(null);
     const dniInputRef = useRef(null);
     const navigate = useNavigate();
@@ -210,6 +218,12 @@ const OnboardingPro = () => {
                     if (pro.bio) setBio(pro.bio);
                     if (pro.experience_years !== null) setExperience(pro.experience_years.toString());
                     if (pro.specialty) setSelectedCategories(pro.specialty.split(',').map(s => s.trim()));
+                    // Store fields
+                    if (pro.business_hours) setBusinessHours(pro.business_hours);
+                    if (pro.store_image) setStoreImagePreview(pro.store_image);
+                    if (pro.delivery_available !== undefined && pro.delivery_available !== null) setDeliveryAvailable(pro.delivery_available);
+                    if (pro.website) setWebsite(pro.website);
+                    if (pro.tax_id) setTaxId(pro.tax_id);
                 }
 
             } catch (err) {
@@ -230,9 +244,11 @@ const OnboardingPro = () => {
     };
 
     const toggleCategory = (id) => {
-        setSelectedCategories(prev =>
-            prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-        );
+        setSelectedCategories(prev => {
+            const isStore = id.startsWith('store-');
+            if (prev.includes(id)) return prev.filter(c => c !== id);
+            return [...prev.filter(c => c.startsWith('store-') === isStore), id];
+        });
     };
 
     const handleSubmit = async () => {
@@ -256,6 +272,22 @@ const OnboardingPro = () => {
                         .from('avatars')
                         .getPublicUrl(fileName);
                     avatarUrl = urlData?.publicUrl || null;
+                }
+            }
+
+            // Upload store image if selected
+            let storeImageUrl = storeImagePreview && !storeImageFile ? storeImagePreview : null;
+            if (storeImageFile) {
+                const ext = storeImageFile.name.split('.').pop();
+                const fileName = `${user.id}/store_${Date.now()}.${ext}`;
+                const { error: storeUploadErr } = await supabase.storage
+                    .from('portfolio')
+                    .upload(fileName, storeImageFile, { cacheControl: '3600', upsert: true });
+                if (!storeUploadErr) {
+                    const { data: urlData } = supabase.storage
+                        .from('portfolio')
+                        .getPublicUrl(fileName);
+                    storeImageUrl = urlData?.publicUrl || null;
                 }
             }
 
@@ -284,10 +316,17 @@ const OnboardingPro = () => {
                 const proData = {
                     full_name: fullName,
                     phone: `${phonePrefix} ${phone}`,
-                    location: locations.filter(l => l.trim()).join(', '),
+                    location: selectedCategories.some(c => c.startsWith('store-'))
+                        ? storeAddress.trim()
+                        : locations.filter(l => l.trim()).join(', '),
                     bio,
                     experience_years: parseInt(experience, 10) || 0,
-                    specialty: specialtyStr
+                    specialty: specialtyStr,
+                    business_hours: businessHours,
+                    store_image: storeImageUrl,
+                    delivery_available: deliveryAvailable,
+                    website: website,
+                    tax_id: taxId
                 };
 
                 if (existing) {
@@ -306,14 +345,22 @@ const OnboardingPro = () => {
             navigate('/dashboard');
         } catch (error) {
             console.error(error);
+            throw error;
         } finally {
             setLoading(false);
         }
     };
 
+    const isStoreSelected = selectedCategories.some(c => c.startsWith('store-'));
+    const stepsFlow = isStoreSelected 
+        ? ['personal', 'languages', 'categories', 'storeContact', 'subscription']
+        : ['personal', 'languages', 'categories', 'subscription'];
+    const currentStepId = stepsFlow[step - 1];
+    const totalSteps = stepsFlow.length;
+
     const renderStep = () => {
-        switch (step) {
-            case 1:
+        switch (currentStepId) {
+            case 'personal':
                 return (
                     <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
                         <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>Datos Personales</h2>
@@ -652,7 +699,7 @@ const OnboardingPro = () => {
                     </motion.div>
                 );
 
-            case 2:
+            case 'languages':
                 return (
                     <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                         <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{t('onb_bio_title', 'Bio Profesional')}</h2>
@@ -676,7 +723,7 @@ const OnboardingPro = () => {
                     </motion.div>
                 );
 
-            case 3:
+            case 'categories':
                 return (
                     <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                         <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{t('onb_specialty', 'Especialidad')}</h2>
@@ -759,12 +806,146 @@ const OnboardingPro = () => {
                                         </button>
                                     ))}
                                 </div>
+
+                                {/* Extra fields when a store is selected */}
+                                {selectedCategories.some(c => c.startsWith('store-')) && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        style={{ marginTop: '16px', padding: '16px', background: 'rgba(245,158,11,0.06)', borderRadius: '12px', border: '1px solid rgba(245,158,11,0.25)', display: 'flex', flexDirection: 'column', gap: '14px' }}
+                                    >
+                                        <p style={{ fontSize: '13px', color: '#f59e0b', fontWeight: '700', margin: 0 }}>
+                                            Datos de contacto de la tienda
+                                        </p>
+                                        <div>
+                                            <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Telefono de la tienda</label>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button type="button" onClick={() => setShowPrefixes(v => !v)} style={{ padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-container)', color: 'var(--text-primary)', fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                    {phonePrefixes.find(p => p.code === phonePrefix)?.flag} {phonePrefix} <ChevronDown size={14} />
+                                                </button>
+                                                <input type="tel" placeholder="612 345 678" value={phone} onChange={e => setPhone(e.target.value)} style={{ flex: 1, padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-container)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }} />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Direccion fisica de la tienda</label>
+                                            <input type="text" placeholder="Ej: C/ Gran Via 45, Madrid" value={storeAddress} onChange={e => setStoreAddress(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-container)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+                                            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: 0 }}>Se usara para el boton Como llegar.</p>
+                                        </div>
+                                    </motion.div>
+                                )}
                             </div>
                         </div>
                     </motion.div>
                 );
 
-            case 4:
+            
+            case 'storeContact':
+                return (
+                    <motion.div key="step-store-contact" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                        <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>Tu Tienda o Almacén</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '28px' }}>Completa todos los detalles para que los profesionales te encuentren más fácil.</p>
+
+                        <div style={{ padding: '20px', background: 'var(--bg-card)', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {/* Nombre & NIF */}
+                            <div style={{ display: 'flex', gap: '12px' }}>
+                                <div style={{ flex: 1.5 }}>
+                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Nombre del negocio *</label>
+                                    <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>NIF/CIF</label>
+                                    <input type="text" placeholder="B12345678" value={taxId} onChange={e => setTaxId(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                            </div>
+                            
+                            {/* Descripción */}
+                            <div>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Descripción breve *</label>
+                                <textarea placeholder="¿Qué venden o en qué se especializan?" value={bio} onChange={e => setBio(e.target.value)} style={{ width: '100%', minHeight: '80px', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box', resize: 'vertical' }} />
+                            </div>
+
+                            {/* Foto del local */}
+                            <div>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Foto del local / almacén</label>
+                                <input ref={storeImageInputRef} type="file" accept="image/*" onChange={e => {
+                                    const file = e.target.files[0];
+                                    if (file) {
+                                        setStoreImageFile(file);
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => setStoreImagePreview(reader.result);
+                                        reader.readAsDataURL(file);
+                                    }
+                                    e.target.value = '';
+                                }} style={{ display: 'none' }} />
+                                
+                                {storeImagePreview ? (
+                                    <div style={{ position: 'relative', width: '100%', height: '160px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                                        <img src={storeImagePreview} alt="Local" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        <button onClick={() => { setStoreImageFile(null); setStoreImagePreview(null); }} style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none', borderRadius: '50%', padding: '6px', cursor: 'pointer' }}><X size={16} /></button>
+                                    </div>
+                                ) : (
+                                    <motion.button whileTap={{ scale: 0.98 }} onClick={() => storeImageInputRef.current?.click()} style={{ width: '100%', height: '100px', borderRadius: '10px', border: '2px dashed var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: '8px' }}>
+                                        <Camera size={24} />
+                                        <span style={{ fontSize: '13px' }}>Añadir foto principal</span>
+                                    </motion.button>
+                                )}
+                            </div>
+
+                            <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
+
+                            {/* Horario y Web */}
+                            <div style={{ display: 'flex', gap: '12px' }}>
+                                <div style={{ flex: 1.5 }}>
+                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Horario de apertura</label>
+                                    <input type="text" placeholder="Ej: L-V 09:00 - 20:00" value={businessHours} onChange={e => setBusinessHours(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Sitio web</label>
+                                    <input type="url" placeholder="Ej: miferr.com" value={website} onChange={e => setWebsite(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                                </div>
+                            </div>
+                            
+                            {/* Envío a obra */}
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                                <div style={{
+                                    width: '24px', height: '24px', borderRadius: '6px',
+                                    background: deliveryAvailable ? 'var(--accent)' : 'var(--bg-card)',
+                                    border: `2px solid ${deliveryAvailable ? 'var(--accent)' : 'var(--border-light)'}`,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', transition: '0.2s'
+                                }}>
+                                    {deliveryAvailable && <Check size={16} color="white" />}
+                                </div>
+                                <input type="checkbox" checked={deliveryAvailable} onChange={e => setDeliveryAvailable(e.target.checked)} style={{ display: 'none' }} />
+                                <div>
+                                    <p style={{ margin: 0, fontSize: '15px', fontWeight: '600' }}>Hacemos envíos a obra</p>
+                                    <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>Diferencial importante</p>
+                                </div>
+                            </label>
+
+                            <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
+
+                            {/* Contacto existents */}
+                            <div>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Teléfono de la tienda *</label>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button type="button" onClick={() => setShowPrefixes(v => !v)} style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                        {phonePrefixes.find(p => p.code === phonePrefix)?.flag} {phonePrefix} <ChevronDown size={14} />
+                                    </button>
+                                    <input type="tel" placeholder="612 345 678" value={phone} onChange={e => setPhone(e.target.value)} style={{ flex: 1, padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none' }} />
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Dirección física exacta *</label>
+                                <input type="text" placeholder="Ej: C/ Gran Vía 45, Madrid" value={storeAddress} onChange={e => setStoreAddress(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', color: 'var(--success)' }}>
+                                    <MapPin size={14} />
+                                    <span style={{ fontSize: '13px' }}>Esta dirección se usará para el botón "Cómo llegar".</span>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                );
+            case 'subscription':
                 return (
                     <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                         <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{t('onb_subscription_title', 'Suscripción Pro')}</h2>
@@ -806,7 +987,7 @@ const OnboardingPro = () => {
                     </motion.div>
                 );
 
-            case 5:
+            case 'verification':
                 return (
                     <motion.div key="step5" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                         <div style={{
@@ -990,14 +1171,14 @@ const OnboardingPro = () => {
     };
 
     return (
-        <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '20px' }}>
+        <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg-primary)', padding: '20px' }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                 <button className="header-back" onClick={() => step > 1 ? setStep(step - 1) : navigate(-1)}>
                     <ChevronLeft size={22} />
                 </button>
                 <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: '500' }}>
-                    {step} de 5
+                    {step} de {totalSteps}
                 </span>
             </div>
 
@@ -1005,7 +1186,7 @@ const OnboardingPro = () => {
             <div style={{ height: '3px', background: 'var(--bg-card)', borderRadius: '2px', marginBottom: '32px' }}>
                 <div style={{
                     height: '100%',
-                    width: `${(step / 5) * 100}%`,
+                    width: `${(step / totalSteps) * 100}%`,
                     background: 'var(--accent)',
                     borderRadius: '2px',
                     transition: 'width 0.4s ease'
@@ -1019,7 +1200,7 @@ const OnboardingPro = () => {
                 <button
                     className="btn btn-primary w-full"
                     onClick={async () => {
-                        if (step === 1 && fullName.trim()) {
+                        if (currentStepId === 'personal' && fullName.trim()) {
                             setLoading(true);
                             try {
                                 const { data: { user } } = await supabase.auth.getUser();
@@ -1040,21 +1221,19 @@ const OnboardingPro = () => {
                             }
                             setLoading(false);
                             setStep(step + 1);
-                        } else if (step === 4) {
-                            // After subscription step, go submit then DNI
+                        } else if (currentStepId === 'subscription') {
                             await handleSubmit();
-                            setStep(5);
-                        } else if (step < 5) {
                             setStep(step + 1);
-                        } else {
-                            // Step 5 done → go to dashboard
+                        } else if (currentStepId === 'verification') {
                             navigate('/dashboard');
+                        } else {
+                            setStep(step + 1);
                         }
                     }}
-                    disabled={loading || (step === 1 && !fullName.trim())}
+                    disabled={loading || (currentStepId === 'personal' && !fullName.trim())}
                     style={{ padding: '16px', fontSize: '15px' }}
                 >
-                    {step === 4 ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita') : step === 5 ? (dniUploaded ? t('onb_next') : t('verify_skip')) : t('onb_next')}
+                    {currentStepId === 'subscription' ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita') : currentStepId === 'verification' ? (dniUploaded ? t('onb_next') : t('verify_skip')) : t('onb_next')}
                     <ChevronRight size={18} />
                 </button>
             </div>

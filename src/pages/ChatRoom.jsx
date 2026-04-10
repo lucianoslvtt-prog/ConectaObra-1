@@ -178,12 +178,19 @@ const ChatRoom = () => {
         const idToUse = senderId || currentUser?.id;
         if (!idToUse) return;
 
-        await supabase.from('messages').insert({
+        const { data: newMsg, error } = await supabase.from('messages').insert({
             conversation_id: id,
             sender_id: idToUse,
             content,
             message_type: type,
-        });
+        }).select().single();
+
+        if (newMsg) {
+            setMessages(prev => {
+                if (prev.some(m => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+            });
+        }
         await supabase.from('conversations').update({
             last_message: content.slice(0, 100),
             last_message_at: new Date().toISOString(),
@@ -198,8 +205,11 @@ const ChatRoom = () => {
         await supabase.from('conversations').update({
             job_status: 'pending_start',
             job_started_by: currentUser.id,
+            job_rated_by: [],
         }).eq('id', id);
+        
         setJobStatus('pending_start');
+        setConversation(prev => ({ ...prev, job_status: 'pending_start', job_started_by: currentUser.id, job_rated_by: [] }));
 
         await insertSystemMessage(
             `🤝 ${myName} quiere comenzar el trabajo. ¿Aceptas?`,
@@ -213,7 +223,9 @@ const ChatRoom = () => {
             job_status: 'in_progress',
             job_started_at: now.toISOString(),
         }).eq('id', id);
+        
         setJobStatus('in_progress');
+        setConversation(prev => ({ ...prev, job_status: 'in_progress', job_started_at: now.toISOString() }));
 
         const myName = await getMyName();
         await insertSystemMessage(`✅ ${myName} ha aceptado. ¡Trabajo en curso!`, 'system_start');
@@ -224,7 +236,9 @@ const ChatRoom = () => {
             job_status: null,
             job_started_by: null,
         }).eq('id', id);
+        
         setJobStatus(null);
+        setConversation(prev => ({ ...prev, job_status: null, job_started_by: null }));
 
         const myName = await getMyName();
         await insertSystemMessage(`❌ ${myName} ha rechazado la solicitud.`, 'system_start');
@@ -233,13 +247,16 @@ const ChatRoom = () => {
     const handleFinishJob = async () => {
         const now = new Date();
         const myName = await getMyName();
+        const deadline = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000).toISOString();
 
         await supabase.from('conversations').update({
             job_status: 'pending_finish',
             job_finished_by: currentUser.id,
-            job_finish_deadline: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+            job_finish_deadline: deadline,
         }).eq('id', id);
+        
         setJobStatus('pending_finish');
+        setConversation(prev => ({ ...prev, job_status: 'pending_finish', job_finished_by: currentUser.id, job_finish_deadline: deadline }));
 
         await insertSystemMessage(
             `🏁 ${myName} quiere finalizar el trabajo. ¿Confirmas?`,
@@ -358,18 +375,31 @@ const ChatRoom = () => {
                 if (result) { mediaUrl = result.url; mediaType = result.type; }
             }
             const content = newMessage.trim() || (mediaType === 'image' ? '📷 Imagen' : '🎬 Vídeo');
-            const { error } = await supabase.from('messages').insert({
+            
+            // Insert and select the new message to update the UI instantly
+            const { data: newMsg, error } = await supabase.from('messages').insert({
                 conversation_id: id,
                 sender_id: currentUser.id,
                 content,
                 media_url: mediaUrl,
                 media_type: mediaType
-            });
+            }).select().single();
+            
             if (error) throw error;
+            
+            // Optimistically update the UI to show the message instantly
+            if (newMsg) {
+                setMessages(prev => {
+                    if (prev.some(m => m.id === newMsg.id)) return prev;
+                    return [...prev, newMsg];
+                });
+            }
+
             await supabase.from('conversations').update({
                 last_message: content.slice(0, 100),
                 last_message_at: new Date().toISOString()
             }).eq('id', id);
+            
             setNewMessage('');
             clearMedia();
         } catch (e) { console.error(e); }
@@ -532,20 +562,34 @@ const ChatRoom = () => {
 
                             {/* System message */}
                             {isSystem ? (
-                                <motion.div
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    style={{
-                                        textAlign: 'center', padding: '10px 16px',
-                                        margin: '6px auto', maxWidth: '90%',
-                                        background: 'var(--bg-card)', borderRadius: '12px',
-                                        border: '1px solid var(--border)',
-                                        fontSize: '13px', color: 'var(--text-secondary)',
-                                        lineHeight: 1.5,
-                                    }}
-                                >
-                                    <p>{msg.content}</p>
-                                    {/* Action buttons for pending_start */}
+                                (() => {
+                                    let displayContent = msg.content;
+                                    
+                                    if (msg.message_type === 'system_start' && msg.content.includes('¿Aceptas?')) {
+                                        if (conversation?.job_started_by === currentUser?.id) {
+                                            displayContent = msg.content.replace(' quiere comenzar el trabajo. ¿Aceptas?', ' ha solicitado comenzar el trabajo.');
+                                        }
+                                    } else if (msg.message_type === 'system_finish' && msg.content.includes('¿Confirmas?')) {
+                                        if (conversation?.job_finished_by === currentUser?.id) {
+                                            displayContent = msg.content.replace(' quiere finalizar el trabajo. ¿Confirmas?', ' ha solicitado finalizar el trabajo.');
+                                        }
+                                    }
+
+                                    return (
+                                        <motion.div
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            style={{
+                                                textAlign: 'center', padding: '10px 16px',
+                                                margin: '6px auto', maxWidth: '90%',
+                                                background: 'var(--bg-card)', borderRadius: '12px',
+                                                border: '1px solid var(--border)',
+                                                fontSize: '13px', color: 'var(--text-secondary)',
+                                                lineHeight: 1.5,
+                                            }}
+                                        >
+                                            <p>{displayContent}</p>
+                                            {/* Action buttons for pending_start */}
                                     {canRespondToStart(msg) && (
                                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
                                             <button onClick={handleAcceptStart} style={{
@@ -575,9 +619,11 @@ const ChatRoom = () => {
                                         {formatTime(msg.created_at)}
                                     </p>
                                 </motion.div>
-                            ) : (
-                                /* Normal message */
-                                <motion.div
+                            );
+                        })()
+                    ) : (
+                        /* Normal message */
+                        <motion.div
                                     initial={{ opacity: 0, y: 6 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     style={{

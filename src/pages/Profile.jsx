@@ -11,12 +11,14 @@ const Profile = () => {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [avatarUploading, setAvatarUploading] = useState(false);
+    const [coverUploading, setCoverUploading] = useState(false);
     const [projectCount, setProjectCount] = useState(0);
     const [reviewCount, setReviewCount] = useState(0);
     const [avgRating, setAvgRating] = useState(null);
     const [userId, setUserId] = useState(null);
     const [verificationStatus, setVerificationStatus] = useState(null);
     const avatarInputRef = useRef(null);
+    const coverInputRef = useRef(null);
     const navigate = useNavigate();
     const { t } = useLanguage();
 
@@ -150,6 +152,43 @@ const Profile = () => {
         }
     };
 
+    const handleCoverUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setCoverUploading(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const ext = file.name.split('.').pop();
+            const fileName = `${user.id}/cover_${Date.now()}.${ext}`;
+
+            const { error: uploadErr } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, file, { cacheControl: '3600', upsert: true });
+
+            if (uploadErr) {
+                console.error('Upload error:', uploadErr);
+                return;
+            }
+
+            const { data: urlData } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(fileName);
+
+            const coverUrl = urlData?.publicUrl;
+            if (coverUrl) {
+                await supabase.from('profiles').update({ cover_url: coverUrl }).eq('id', user.id);
+                setProfile(prev => ({ ...prev, cover_url: coverUrl }));
+            }
+        } catch (err) {
+            console.error('Cover upload failed:', err);
+        } finally {
+            setCoverUploading(false);
+            e.target.value = '';
+        }
+    };
+
     if (loading) {
         return (
             <div className="page">
@@ -175,8 +214,37 @@ const Profile = () => {
 
                 {/* Profile card */}
                 <div style={{ padding: '24px 20px' }}>
-                    <div className="card" style={{ textAlign: 'center', padding: '28px 20px', position: 'relative' }}>
-                        {/* Languages spoken */}
+                    <div className="card" style={{ 
+                        textAlign: 'center', padding: '28px 20px', position: 'relative', overflow: 'hidden',
+                        backgroundImage: profile?.cover_url ? `url(${profile.cover_url})` : 'none',
+                        backgroundSize: 'cover', backgroundPosition: 'center',
+                    }}>
+                        {profile?.cover_url && (
+                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(22, 32, 50, 0.4), rgba(22, 32, 50, 0.95))', zIndex: 0 }} />
+                        )}
+                        <input
+                            ref={coverInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleCoverUpload}
+                            style={{ display: 'none' }}
+                        />
+                        <button
+                            onClick={() => coverInputRef.current?.click()}
+                            disabled={coverUploading}
+                            className="card-hover"
+                            style={{
+                                position: 'absolute', top: '12px', right: '12px', zIndex: 2,
+                                background: 'rgba(0,0,0,0.5)', color: 'white', border: '1px solid rgba(255,255,255,0.2)',
+                                borderRadius: '50%', width: '32px', height: '32px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer', opacity: coverUploading ? 0.5 : 1, backdropFilter: 'blur(4px)'
+                            }}
+                        >
+                            <Image size={16} />
+                        </button>
+                        <div style={{ position: 'relative', zIndex: 1 }}>
+                            {/* Languages spoken */}
                         {profile?.languages && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', marginBottom: '16px' }}>
                                 {profile.languages.split(',').map(l => l.trim()).filter(Boolean).map(langId => {
@@ -299,31 +367,26 @@ const Profile = () => {
                         <span className="badge badge-blue" style={{ marginTop: '4px' }}>
                             {profile?.role === 'professional' ? `🔧 ${t('prof_professional')}` : `👤 ${t('prof_particular')}`}
                         </span>
-                        {profile?.role === 'professional' && (
+                        {profile?.role === 'professional' && (verificationStatus === 'approved' || verificationStatus === 'pending') && (
                             <span style={{
                                 display: 'inline-flex', alignItems: 'center', gap: '4px',
                                 padding: '4px 12px', borderRadius: '16px', marginTop: '8px',
                                 fontSize: '12px', fontWeight: '600',
                                 background: verificationStatus === 'approved'
                                     ? 'rgba(34,197,94,0.15)'
-                                    : verificationStatus === 'pending'
-                                        ? 'rgba(245,158,11,0.15)'
-                                        : 'rgba(239,68,68,0.1)',
+                                    : 'rgba(245,158,11,0.15)',
                                 color: verificationStatus === 'approved'
                                     ? '#22c55e'
-                                    : verificationStatus === 'pending'
-                                        ? '#f59e0b'
-                                        : 'var(--text-muted)',
+                                    : '#f59e0b',
                                 border: `1px solid ${verificationStatus === 'approved'
                                     ? 'rgba(34,197,94,0.3)'
-                                    : verificationStatus === 'pending'
-                                        ? 'rgba(245,158,11,0.3)'
-                                        : 'var(--border)'}`,
+                                    : 'rgba(245,158,11,0.3)'}`,
                             }}>
                                 <Shield size={12} />
-                                {verificationStatus === 'approved' ? `✓ ${t('verify_badge')}` : verificationStatus === 'pending' ? `⏳ ${t('verify_pending')}` : t('verify_not')}
+                                {verificationStatus === 'approved' ? `✓ ${t('verify_badge')}` : `⏳ ${t('verify_pending')}`}
                             </span>
                         )}
+                        </div>
                     </div>
                 </div>
 
@@ -359,7 +422,7 @@ const Profile = () => {
                         { icon: Star, label: t('prof_reviews_menu'), desc: t('prof_reviews_desc'), path: '/my-reviews' },
                         { icon: Briefcase, label: t('prof_projects_menu'), desc: t('prof_projects_desc'), path: '/my-projects' },
                         ...(profile?.role === 'professional' ? [{ icon: Image, label: 'Mi Portfolio', desc: 'Gestiona y destaca tus imágenes', path: `/professional/${userId}/portfolio` }] : []),
-                        ...(profile?.role === 'professional' && verificationStatus !== 'approved' ? [{ icon: Shield, label: t('verify_menu'), desc: t('verify_menu_desc'), path: '/onboarding-pro' }] : []),
+
                     ].map((item, i) => (
                         <motion.div
                             key={i}

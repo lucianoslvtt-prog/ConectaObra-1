@@ -120,10 +120,31 @@ const ProfessionalProfile = () => {
     // Get pro data from navigation state, DB, or defaults
     const passedPro = location.state?.pro;
     const isProRole = (dbProfile?.role === 'professional') || (passedPro?.role === 'professional');
+    
+    // Extracted languages definition
+    const allLanguages = [
+        { id: 'es', name: 'Español', flag: '🇪🇸' },
+        { id: 'en', name: 'Inglés', flag: '🇬🇧' },
+        { id: 'fr', name: 'Francés', flag: '🇫🇷' },
+        { id: 'pt', name: 'Portugués', flag: '🇵🇹' },
+        { id: 'de', name: 'Alemán', flag: '🇩🇪' },
+        { id: 'it', name: 'Italiano', flag: '🇮🇹' },
+        { id: 'ro', name: 'Rumano', flag: '🇷🇴' },
+        { id: 'ar', name: 'Árabe', flag: '🇸🇦' },
+        { id: 'zh', name: 'Chino', flag: '🇨🇳' },
+        { id: 'ru', name: 'Ruso', flag: '🇷🇺' },
+        { id: 'uk', name: 'Ucraniano', flag: '🇺🇦' },
+        { id: 'pl', name: 'Polaco', flag: '🇵🇱' },
+        { id: 'nl', name: 'Holandés', flag: '🇳🇱' },
+        { id: 'sv', name: 'Sueco', flag: '🇸🇪' },
+        { id: 'no', name: 'Noruego', flag: '🇳🇴' },
+    ];
+
     const pro = {
         name: passedPro?.name || dbProfile?.full_name || dbProfile?.username || defaultPro.name,
         specialty: isProRole ? (passedPro?.specialty || dbProfile?.specialty || defaultPro.specialty) : null,
         location: passedPro?.location || dbProfile?.location || '',
+        languages: isProRole ? (dbProfile?.languages ? dbProfile.languages.split(',').map(l => l.trim()) : []) : [],
         rating: realAvgRating || passedPro?.rating || defaultPro.rating,
         reviews: realReviews.length || passedPro?.reviews || defaultPro.reviews,
         experience: isProRole ? (dbProData?.experience_years ?? passedPro?.experience ?? 0) : null,
@@ -331,6 +352,25 @@ const ProfessionalProfile = () => {
                     {pro.location && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
                             <MapPin size={13} /> {pro.location}
+                        </div>
+                    )}
+                    {pro.languages && pro.languages.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
+                            {pro.languages.map(langId => {
+                                const lang = allLanguages.find(l => l.id === langId);
+                                if (!lang) return null;
+                                return (
+                                    <span key={langId} style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                        padding: '4px 10px', borderRadius: '16px',
+                                        background: 'var(--bg-card)', color: 'var(--text-primary)',
+                                        fontSize: '12px', fontWeight: '600',
+                                        border: '1px solid var(--border)'
+                                    }}>
+                                        <span>{lang.flag}</span> {lang.name}
+                                    </span>
+                                );
+                            })}
                         </div>
                     )}
 
@@ -653,12 +693,30 @@ const ProfessionalProfile = () => {
                             const { data: { user } } = await supabase.auth.getUser();
                             if (!user) { navigate('/auth'); return; }
 
-                            // Create conversation
+                            // Don't allow messaging yourself
+                            if (user.id === id) {
+                                setContacting(false);
+                                return;
+                            }
+
+                            // Check for existing conversation
+                            const { data: existing } = await supabase
+                                .from('conversations')
+                                .select('id')
+                                .or(`and(participant_1.eq.${user.id},participant_2.eq.${id}),and(participant_1.eq.${id},participant_2.eq.${user.id})`)
+                                .maybeSingle();
+
+                            if (existing) {
+                                navigate(`/chat/${existing.id}`);
+                                return;
+                            }
+
+                            // Create conversation with the professional
                             const { data: conv, error } = await supabase
                                 .from('conversations')
                                 .insert({
                                     participant_1: user.id,
-                                    participant_2: user.id,
+                                    participant_2: id,
                                     poster_name: pro.name,
                                     original_post_content: `${pro.specialty} — ${pro.location}`,
                                     last_message: t('chat_reply_label') || 'Contacto',

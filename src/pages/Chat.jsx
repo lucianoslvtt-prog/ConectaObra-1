@@ -118,12 +118,12 @@ const Chat = () => {
                                         color: conv.otherUser?.role === 'professional' ? '#22c55e' : 'var(--accent)',
                                         flexShrink: 0
                                     }}>
-                                        {(conv.poster_name || conv.otherUser?.username)?.[0]?.toUpperCase() || '?'}
+                                        {(conv.otherUser?.username)?.[0]?.toUpperCase() || '?'}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
-                                                <p style={{ fontSize: '14px', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.poster_name || conv.otherUser?.username || 'Usuario'}</p>
+                                                <p style={{ fontSize: '14px', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.otherUser?.username || 'Usuario'}</p>
                                                 {conv.job_status === 'in_progress' && (
                                                     <span style={{
                                                         padding: '2px 8px', borderRadius: '10px', fontSize: '9px', fontWeight: '700',
