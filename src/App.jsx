@@ -20,6 +20,7 @@ import SearchResults from './pages/SearchResults';
 import PortfolioGallery from './pages/PortfolioGallery';
 import ResetPassword from './pages/ResetPassword';
 import VerifyIdentity from './pages/VerifyIdentity';
+import Subscription from './pages/Subscription';
 
 function App() {
     const [ready, setReady] = useState(false);
@@ -98,6 +99,7 @@ function App() {
                 <Route path="/my-reviews" element={<MyReviews />} />
                 <Route path="/search" element={<SearchResults />} />
                 <Route path="/verify-identity" element={<VerifyIdentity />} />
+                <Route path="/subscription" element={<Subscription />} />
             </Routes>
         </Router>
     );
