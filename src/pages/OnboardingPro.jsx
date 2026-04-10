@@ -251,101 +251,98 @@ const OnboardingPro = () => {
         });
     };
 
+    // Save profile data without navigating - returns the user object
+    const saveProfileData = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('No user');
+
+        const specialtyStr = selectedCategories.join(', ');
+
+        // Upload avatar if selected
+        let avatarUrl = null;
+        if (avatarFile) {
+            const ext = avatarFile.name.split('.').pop();
+            const fileName = `${user.id}/avatar_${Date.now()}.${ext}`;
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, avatarFile, { cacheControl: '3600', upsert: true });
+            if (!uploadErr) {
+                const { data: urlData } = supabase.storage
+                    .from('avatars')
+                    .getPublicUrl(fileName);
+                avatarUrl = urlData?.publicUrl || null;
+            }
+        }
+
+        // Upload store image if selected
+        let storeImageUrl = storeImagePreview && !storeImageFile ? storeImagePreview : null;
+        if (storeImageFile) {
+            const ext = storeImageFile.name.split('.').pop();
+            const fileName = `${user.id}/store_${Date.now()}.${ext}`;
+            const { error: storeUploadErr } = await supabase.storage
+                .from('portfolio')
+                .upload(fileName, storeImageFile, { cacheControl: '3600', upsert: true });
+            if (!storeUploadErr) {
+                const { data: urlData } = supabase.storage
+                    .from('portfolio')
+                    .getPublicUrl(fileName);
+                storeImageUrl = urlData?.publicUrl || null;
+            }
+        }
+
+        // Save to profiles table (reliable - this always works)
+        const locationStr = locations.filter(l => l.trim()).join(', ');
+        const profileUpdate = {
+            role: 'professional',
+            username: fullName,
+            full_name: fullName,
+            specialty: specialtyStr,
+            languages: selectedLanguages.join(', '),
+            location: locationStr || null,
+        };
+        if (avatarUrl) profileUpdate.avatar_url = avatarUrl;
+
+        await supabase.from('profiles').update(profileUpdate).eq('id', user.id);
+
+        // Also try to save to professionals table (best-effort)
+        const { data: existing } = await supabase
+            .from('professionals')
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        const proData = {
+            full_name: fullName,
+            phone: `${phonePrefix} ${phone}`,
+            location: selectedCategories.some(c => c.startsWith('store-'))
+                ? storeAddress.trim()
+                : locations.filter(l => l.trim()).join(', '),
+            bio,
+            experience_years: parseInt(experience, 10) || 0,
+            specialty: specialtyStr,
+            business_hours: businessHours,
+            store_image: storeImageUrl,
+            delivery_available: deliveryAvailable,
+            website: website,
+            tax_id: taxId
+        };
+
+        if (existing) {
+            await supabase.from('professionals').update(proData).eq('user_id', user.id);
+        } else {
+            await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'active', user_id: user.id });
+        }
+
+        return user;
+    };
+
     const handleSubmit = async () => {
         setLoading(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('No user');
-
-            const specialtyStr = selectedCategories.join(', ');
-
-            // Upload avatar if selected
-            let avatarUrl = null;
-            if (avatarFile) {
-                const ext = avatarFile.name.split('.').pop();
-                const fileName = `${user.id}/avatar_${Date.now()}.${ext}`;
-                const { data: uploadData, error: uploadErr } = await supabase.storage
-                    .from('avatars')
-                    .upload(fileName, avatarFile, { cacheControl: '3600', upsert: true });
-                if (!uploadErr) {
-                    const { data: urlData } = supabase.storage
-                        .from('avatars')
-                        .getPublicUrl(fileName);
-                    avatarUrl = urlData?.publicUrl || null;
-                }
-            }
-
-            // Upload store image if selected
-            let storeImageUrl = storeImagePreview && !storeImageFile ? storeImagePreview : null;
-            if (storeImageFile) {
-                const ext = storeImageFile.name.split('.').pop();
-                const fileName = `${user.id}/store_${Date.now()}.${ext}`;
-                const { error: storeUploadErr } = await supabase.storage
-                    .from('portfolio')
-                    .upload(fileName, storeImageFile, { cacheControl: '3600', upsert: true });
-                if (!storeUploadErr) {
-                    const { data: urlData } = supabase.storage
-                        .from('portfolio')
-                        .getPublicUrl(fileName);
-                    storeImageUrl = urlData?.publicUrl || null;
-                }
-            }
-
-            // Save to profiles table (reliable - this always works)
-            const locationStr = locations.filter(l => l.trim()).join(', ');
-            const profileUpdate = {
-                role: 'professional',
-                username: fullName,
-                full_name: fullName,
-                specialty: specialtyStr,
-                languages: selectedLanguages.join(', '),
-                location: locationStr || null,
-            };
-            if (avatarUrl) profileUpdate.avatar_url = avatarUrl;
-
-            await supabase.from('profiles').update(profileUpdate).eq('id', user.id);
-
-            // Also try to save to professionals table (best-effort)
-            try {
-                const { data: existing } = await supabase
-                    .from('professionals')
-                    .select('id')
-                    .eq('user_id', user.id)
-                    .maybeSingle();
-
-                const proData = {
-                    full_name: fullName,
-                    phone: `${phonePrefix} ${phone}`,
-                    location: selectedCategories.some(c => c.startsWith('store-'))
-                        ? storeAddress.trim()
-                        : locations.filter(l => l.trim()).join(', '),
-                    bio,
-                    experience_years: parseInt(experience, 10) || 0,
-                    specialty: specialtyStr,
-                    business_hours: businessHours,
-                    store_image: storeImageUrl,
-                    delivery_available: deliveryAvailable,
-                    website: website,
-                    tax_id: taxId
-                };
-
-                if (existing) {
-                    const { error: updateErr } = await supabase.from('professionals').update(proData).eq('user_id', user.id);
-                    if (updateErr) throw updateErr;
-                } else {
-                    const { error: insertErr } = await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'active', user_id: user.id });
-                    if (insertErr) throw insertErr;
-                }
-            } catch (proErr) {
-                console.error('Pro table save error:', proErr);
-                alert('No se pudieron guardar algunos datos profesionales: ' + (proErr.message || 'Error desconocido'));
-                throw proErr; // Prevent navigation so we see what failed
-            }
-
+            await saveProfileData();
             navigate('/dashboard');
         } catch (error) {
             console.error(error);
-            throw error;
         } finally {
             setLoading(false);
         }
@@ -1224,9 +1221,9 @@ const OnboardingPro = () => {
                         } else if (currentStepId === 'subscription') {
                             setLoading(true);
                             try {
-                                await handleSubmit();
-                                // Redirect to Stripe Checkout
-                                const { data: { user } } = await supabase.auth.getUser();
+                                // Save profile data first
+                                const user = await saveProfileData();
+                                // Then redirect to Stripe Checkout
                                 const response = await fetch('/api/create-checkout-session', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
@@ -1244,7 +1241,6 @@ const OnboardingPro = () => {
                                 }
                             } catch (error) {
                                 console.error('Error:', error);
-                                // If Stripe fails, still go to dashboard
                                 navigate('/dashboard');
                             } finally {
                                 setLoading(false);
