@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
-import Welcome from './pages/Welcome';
-import Auth from './pages/Auth';
+
 import OnboardingPro from './pages/OnboardingPro';
 import Dashboard from './pages/Dashboard';
 import Directory from './pages/Directory';
@@ -81,8 +80,7 @@ function App() {
     return (
         <Router>
             <Routes>
-                <Route path="/" element={<Welcome />} />
-                <Route path="/auth" element={<Auth />} />
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/onboarding-pro" element={<OnboardingPro />} />
                 <Route path="/dashboard" element={<Dashboard />} />
