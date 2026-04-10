@@ -1,8 +1,3 @@
-import Stripe from 'stripe';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const priceId = process.env.STRIPE_PRICE_ID;
-
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -11,18 +6,39 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+    const priceId = process.env.STRIPE_PRICE_ID;
+
+    if (!secretKey || !priceId) {
+        return res.status(500).json({ error: 'Stripe not configured' });
+    }
+
     try {
         const { email, userId } = req.body || {};
 
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            mode: 'subscription',
-            customer_email: email || undefined,
-            line_items: [{ price: priceId, quantity: 1 }],
-            success_url: `https://conecta-obra-psi.vercel.app/dashboard?subscription=success`,
-            cancel_url: `https://conecta-obra-psi.vercel.app/subscription?cancelled=true`,
-            metadata: { userId: userId || '' },
+        const params = new URLSearchParams();
+        params.append('mode', 'subscription');
+        params.append('line_items[0][price]', priceId);
+        params.append('line_items[0][quantity]', '1');
+        params.append('success_url', 'https://conecta-obra-psi.vercel.app/dashboard?subscription=success');
+        params.append('cancel_url', 'https://conecta-obra-psi.vercel.app/subscription?cancelled=true');
+        if (email) params.append('customer_email', email);
+        if (userId) params.append('metadata[userId]', userId);
+
+        const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${secretKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params.toString(),
         });
+
+        const session = await response.json();
+
+        if (session.error) {
+            return res.status(400).json({ error: session.error.message });
+        }
 
         return res.status(200).json({ url: session.url });
     } catch (error) {
