@@ -263,7 +263,7 @@ const OnboardingPro = () => {
         if (avatarFile) {
             const ext = avatarFile.name.split('.').pop();
             const fileName = `${user.id}/avatar_${Date.now()}.${ext}`;
-            const { data: uploadData, error: uploadErr } = await supabase.storage
+            const { error: uploadErr } = await supabase.storage
                 .from('avatars')
                 .upload(fileName, avatarFile, { cacheControl: '3600', upsert: true });
             if (!uploadErr) {
@@ -290,21 +290,22 @@ const OnboardingPro = () => {
             }
         }
 
-        // Save to profiles table (reliable - this always works)
+        // Save to profiles table
         const locationStr = locations.filter(l => l.trim()).join(', ');
         const profileUpdate = {
             role: 'professional',
-            username: fullName,
-            full_name: fullName,
+            username: fullName.trim(),
+            full_name: fullName.trim(),
             specialty: specialtyStr,
             languages: selectedLanguages.join(', '),
             location: locationStr || null,
         };
         if (avatarUrl) profileUpdate.avatar_url = avatarUrl;
 
-        await supabase.from('profiles').update(profileUpdate).eq('id', user.id);
+        const { error: profileErr } = await supabase.from('profiles').update(profileUpdate).eq('id', user.id);
+        if (profileErr) throw new Error(`Error al actualizar perfil: ${profileErr.message}`);
 
-        // Also try to save to professionals table (best-effort)
+        // Save to professionals table
         const { data: existing } = await supabase
             .from('professionals')
             .select('id')
@@ -312,7 +313,7 @@ const OnboardingPro = () => {
             .maybeSingle();
 
         const proData = {
-            full_name: fullName,
+            full_name: fullName.trim(),
             phone: `${phonePrefix} ${phone}`,
             location: selectedCategories.some(c => c.startsWith('store-'))
                 ? storeAddress.trim()
@@ -328,9 +329,11 @@ const OnboardingPro = () => {
         };
 
         if (existing) {
-            await supabase.from('professionals').update(proData).eq('user_id', user.id);
+            const { error: updateErr } = await supabase.from('professionals').update(proData).eq('user_id', user.id);
+            if (updateErr) throw new Error(`Error al actualizar profesional: ${updateErr.message}`);
         } else {
-            await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'active', user_id: user.id });
+            const { error: insertErr } = await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'active', user_id: user.id });
+            if (insertErr) throw new Error(`Error al crear profesional: ${insertErr.message}`);
         }
 
         return user;
@@ -343,6 +346,7 @@ const OnboardingPro = () => {
             navigate('/dashboard');
         } catch (error) {
             console.error(error);
+            alert(error.message);
         } finally {
             setLoading(false);
         }
@@ -1241,7 +1245,8 @@ const OnboardingPro = () => {
                                 }
                             } catch (error) {
                                 console.error('Error:', error);
-                                navigate('/dashboard');
+                                alert(error.message);
+                                // Optional: Keep them on this page instead of navigating
                             } finally {
                                 setLoading(false);
                             }
