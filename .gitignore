@@ -7,3 +7,10 @@ dist
 *.log
 .vercel
 .env*.local
+
+# Archivos de entorno - nunca subir al repo
+.env
+.env.local
+.env.vercel
+.env.vercel.prod
+.env.*.local
