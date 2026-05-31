@@ -24,16 +24,31 @@ const Chat = () => {
             if (!user) return;
             setCurrentUser(user);
 
+            // Get conversation IDs where I'm a participant
+            const { data: myConvIds } = await supabase
+                .from('conversation_participants')
+                .select('conversation_id')
+                .eq('user_id', user.id);
+
+            if (!myConvIds || myConvIds.length === 0) return;
+
+            const ids = myConvIds.map(c => c.conversation_id);
+
+            // Get conversations with all their participants
             const { data } = await supabase
                 .from('conversations')
-                .select('*')
-                .or(`participant_1.eq.${user.id},participant_2.eq.${user.id}`)
+                .select('*, conversation_participants(user_id), jobs(status)')
+                .in('id', ids)
                 .order('last_message_at', { ascending: false });
 
             if (data && data.length > 0) {
                 // Get profiles for the other participants
-                const otherIds = data.map(c => c.participant_1 === user.id ? c.participant_2 : c.participant_1);
+                const otherIds = data.flatMap(c => {
+                    const participants = (c.conversation_participants || []).map(p => p.user_id);
+                    return participants.filter(pid => pid !== user.id);
+                });
                 const uniqueIds = [...new Set(otherIds)];
+
 
                 const { data: profiles } = await supabase
                     .from('profiles')
@@ -44,18 +59,22 @@ const Chat = () => {
                 profiles?.forEach(p => profileMap[p.id] = p);
 
                 const enriched = data.map(c => {
-                    const otherId = c.participant_1 === user.id ? c.participant_2 : c.participant_1;
-                    const isSelfChat = c.participant_1 === c.participant_2;
+                    const participants = (c.conversation_participants || []).map(p => p.user_id);
+                    const otherId = participants.find(pid => pid !== user.id) || user.id;
+                    const isSelfChat = !participants.find(pid => pid !== user.id);
                     const displayUser = isSelfChat && c.poster_name
                         ? { username: c.poster_name, role: 'user' }
                         : (profileMap[otherId] || { username: 'Usuario', role: 'user' });
-                    return { ...c, otherUser: displayUser };
+                    return { ...c, otherUser: displayUser, job_status: c.jobs?.[0]?.status || null };
                 });
 
+
                 setConversations(enriched);
+            } else {
+
             }
         } catch (e) {
-            console.error(e);
+            console.error('Error loading conversations:', e);
         } finally {
             setLoading(false);
         }

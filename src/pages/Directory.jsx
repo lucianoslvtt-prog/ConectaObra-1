@@ -1,27 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, MapPin, ChevronRight, Hammer, Store, Droplets, TreePine, Square, Zap, Paintbrush, CircleDot } from 'lucide-react';
 import BottomNav from '../components/BottomNav';
 import { useLanguage } from '../lib/LanguageContext';
+import { supabase } from '../lib/supabase';
 
-const stores = [
-    { id: 'hardware', name: 'Ferretería', tkey: 'store_hardware', dkey: 'store_hardware_desc', icon: Hammer, color: '#f59e0b', count: 42 },
-    { id: 'materials', name: 'Materiales de obra', tkey: 'store_materials', dkey: 'store_materials_desc', icon: Store, color: '#8b5cf6', count: 38 },
-    { id: 'plumbing', name: 'Fontanería', tkey: 'store_plumbing', dkey: 'store_plumbing_desc', icon: Droplets, color: '#22c55e', count: 27 },
-    { id: 'wood', name: 'Maderas', tkey: 'store_wood', dkey: 'store_wood_desc', icon: TreePine, color: '#a16207', count: 19 },
-    { id: 'aluminum', name: 'Aluminio', tkey: 'store_aluminum', dkey: 'store_aluminum_desc', icon: Square, color: '#64748b', count: 15 },
-    { id: 'electrical', name: 'Electricidad', tkey: 'store_electrical', dkey: 'store_electrical_desc', icon: Zap, color: '#ef4444', count: 31 },
-    { id: 'paint', name: 'Pinturas', tkey: 'store_paint', dkey: 'store_paint_desc', icon: Paintbrush, color: '#3b82f6', count: 24 },
-    { id: 'iron', name: 'Hierros', tkey: 'store_iron', dkey: 'store_iron_desc', icon: CircleDot, color: '#78716c', count: 12 },
+const storeCategories = [
+    { id: 'hardware', specialty: 'store-hardware', name: 'Ferretería', tkey: 'store_hardware', dkey: 'store_hardware_desc', icon: Hammer, color: '#f59e0b' },
+    { id: 'materials', specialty: 'store-materials', name: 'Materiales de obra', tkey: 'store_materials', dkey: 'store_materials_desc', icon: Store, color: '#8b5cf6' },
+    { id: 'plumbing', specialty: 'store-plumbing', name: 'Fontanería', tkey: 'store_plumbing', dkey: 'store_plumbing_desc', icon: Droplets, color: '#22c55e' },
+    { id: 'wood', specialty: 'store-wood', name: 'Maderas', tkey: 'store_wood', dkey: 'store_wood_desc', icon: TreePine, color: '#a16207' },
+    { id: 'aluminum', specialty: 'store-aluminum', name: 'Aluminio', tkey: 'store_aluminum', dkey: 'store_aluminum_desc', icon: Square, color: '#64748b' },
+    { id: 'electrical', specialty: 'store-electrical', name: 'Electricidad', tkey: 'store_electrical', dkey: 'store_electrical_desc', icon: Zap, color: '#ef4444' },
+    { id: 'paint', specialty: 'store-paint', name: 'Pinturas', tkey: 'store_paint', dkey: 'store_paint_desc', icon: Paintbrush, color: '#3b82f6' },
+    { id: 'iron', specialty: 'store-iron', name: 'Hierros', tkey: 'store_iron', dkey: 'store_iron_desc', icon: CircleDot, color: '#78716c' },
 ];
 
 const Directory = () => {
     const [searchQuery, setSearchQuery] = useState('');
+    const [storeCounts, setStoreCounts] = useState({});
     const navigate = useNavigate();
     const { t } = useLanguage();
 
-    const filtered = stores.filter(s =>
+    useEffect(() => {
+        const fetchCounts = async () => {
+            const counts = {};
+            await Promise.all(
+                storeCategories.map(async (cat) => {
+                    const { count, error } = await supabase
+                        .from('professionals')
+                        .select('*', { count: 'exact', head: true })
+                        .ilike('specialty', `%${cat.specialty}%`);
+                    counts[cat.id] = error ? 0 : (count || 0);
+                })
+            );
+            setStoreCounts(counts);
+        };
+        fetchCounts();
+    }, []);
+
+    const filtered = storeCategories.filter(s =>
         (t(s.tkey) || s.name).toLowerCase().includes(searchQuery.toLowerCase()) ||
         t(s.dkey).toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -76,7 +95,7 @@ const Directory = () => {
                                     <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{t(store.dkey)}</p>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                         <MapPin size={11} color="var(--text-muted)" />
-                                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{store.count} {t('store_near')}</span>
+                                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{storeCounts[store.id] !== undefined ? storeCounts[store.id] : '...'} {t('store_near')}</span>
                                     </div>
                                 </div>
                                 <ChevronRight size={18} color="var(--text-muted)" />

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
 
+import Auth from './pages/Auth';
 import OnboardingPro from './pages/OnboardingPro';
 import Dashboard from './pages/Dashboard';
 import Directory from './pages/Directory';
@@ -21,45 +22,24 @@ import PortfolioGallery from './pages/PortfolioGallery';
 import ResetPassword from './pages/ResetPassword';
 import VerifyIdentity from './pages/VerifyIdentity';
 import Subscription from './pages/Subscription';
+import EditProfileParticular from './pages/EditProfileParticular';
 
 function App() {
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
         const init = async () => {
-            // Determine which dev account to use via ?user= query param
-            const params = new URLSearchParams(window.location.search);
-            const userParam = params.get('user');
-
-            const accounts = {
-                '1': { email: 'lucianotest10@gmail.com', password: 'luciano' },
-                '2': { email: 'lucianoslvtt@gmail.com', password: 'luciano' }
-            };
-
-            const account = accounts[userParam] || accounts['1'];
-
-            // Check current session
-            const { data: { session } } = await supabase.auth.getSession();
-
-            // If logged in as a different user than requested, sign out first
-            if (session && session.user.email !== account.email) {
-                await supabase.auth.signOut();
-            }
-
-            // Sign in if not already logged in as the correct user
-            const { data: { session: currentSession } } = await supabase.auth.getSession();
-            if (!currentSession) {
-                await supabase.auth.signInWithPassword({
-                    email: account.email,
-                    password: account.password
-                });
-            }
-
+            await supabase.auth.getSession();
             setReady(true);
         };
         init();
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(() => { });
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                // Navigate to reset-password page when recovery link is clicked
+                window.location.href = '/reset-password';
+            }
+        });
         return () => subscription.unsubscribe();
     }, []);
 
@@ -81,7 +61,8 @@ function App() {
     return (
         <Router>
             <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<Navigate to="/auth" replace />} />
+                <Route path="/auth" element={<Auth />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/onboarding-pro" element={<OnboardingPro />} />
                 <Route path="/dashboard" element={<Dashboard />} />
@@ -100,6 +81,7 @@ function App() {
                 <Route path="/search" element={<SearchResults />} />
                 <Route path="/verify-identity" element={<VerifyIdentity />} />
                 <Route path="/subscription" element={<Subscription />} />
+                <Route path="/edit-profile-particular" element={<EditProfileParticular />} />
             </Routes>
         </Router>
     );

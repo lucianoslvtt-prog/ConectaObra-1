@@ -299,6 +299,70 @@ const CategoryList = () => {
                             </motion.div>
                         ))
                     )}
+
+                    {/* CTA for professionals */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                        style={{
+                            marginTop: '24px',
+                            marginBottom: '100px',
+                            borderRadius: '16px',
+                            background: 'linear-gradient(135deg, #0c1a30 0%, #162d50 50%, #1a3a6a 100%)',
+                            border: '1px solid rgba(37,99,235,0.2)',
+                            padding: '24px 20px',
+                            textAlign: 'center',
+                            position: 'relative',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        <div style={{
+                            position: 'absolute', top: '-30px', right: '-30px',
+                            width: '120px', height: '120px',
+                            background: 'radial-gradient(circle, rgba(37,99,235,0.2) 0%, transparent 70%)',
+                            borderRadius: '50%', pointerEvents: 'none',
+                        }} />
+                        <div style={{
+                            position: 'absolute', bottom: '-20px', left: '-20px',
+                            width: '100px', height: '100px',
+                            background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)',
+                            borderRadius: '50%', pointerEvents: 'none',
+                        }} />
+                        <div style={{ position: 'relative', zIndex: 1 }}>
+                            <div style={{
+                                width: '52px', height: '52px', borderRadius: '14px',
+                                background: 'rgba(37,99,235,0.15)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                margin: '0 auto 14px', fontSize: '24px',
+                            }}>
+                                🔧
+                            </div>
+                            <h3 style={{
+                                fontSize: '16px', fontWeight: '700', color: '#ffffff',
+                                marginBottom: '8px', lineHeight: 1.4,
+                            }}>
+                                {t('cat_cta_title')}
+                            </h3>
+                            <p style={{
+                                fontSize: '13px', color: 'rgba(255,255,255,0.6)',
+                                lineHeight: 1.5, maxWidth: '280px',
+                                margin: '0 auto 18px',
+                            }}>
+                                {t('cat_cta_desc')}
+                            </p>
+                            <button
+                                onClick={() => navigate('/onboarding-pro')}
+                                className="btn btn-primary"
+                                style={{
+                                    padding: '12px 28px', fontSize: '14px',
+                                    boxShadow: '0 4px 16px rgba(37,99,235,0.3)',
+                                }}
+                            >
+                                {t('cat_cta_btn')}
+                            </button>
+                        </div>
+                    </motion.div>
                 </div>
             </div>
             <BottomNav />

@@ -68,8 +68,8 @@ const SearchResults = () => {
         // Also keep string return for localStorage/navigation state
         if (defaultColor === 'string_only') {
             return specialtyStr.split(',').map(s => {
-                const t = trades.find(tr => tr.id === s.trim());
-                return t ? t.name : s.trim();
+                const tr = trades.find(x => x.id === s.trim());
+                return tr ? (t(tr.tkey) || tr.name) : s.trim();
             }).join(', ');
         }
 
@@ -78,9 +78,9 @@ const SearchResults = () => {
                 {specialtyStr.split(',').map(s => {
                     const tradeId = s.trim();
                     if (!tradeId) return null;
-                    const t = trades.find(tr => tr.id === tradeId);
-                    const name = t ? t.name : tradeId;
-                    const color = t ? t.color : (defaultColor || 'var(--accent)');
+                    const tr = trades.find(x => x.id === tradeId);
+                    const name = tr ? (t(tr.tkey) || tr.name) : tradeId;
+                    const color = tr ? tr.color : (defaultColor || 'var(--accent)');
                     return (
                         <span key={tradeId} style={{
                             display: 'inline-flex', alignItems: 'center',

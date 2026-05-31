@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image, Send, MoreHorizontal, Bell, Reply, X, Plus, Camera, Video } from 'lucide-react';
+import { Image, Send, MoreHorizontal, Bell, Reply, X, Plus, Camera, Video, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { trades } from '../data/categories';
@@ -13,7 +13,7 @@ const samplePosts = [
         user: 'Luis Pérez',
         avatar: 'L',
         time: 'hace 2h',
-        content: 'Finished the framing on this beautiful lot. Another one worth of experience to the field.',
+        content: 'Terminamos el encofrado en este terreno precioso. Otra obra más de experiencia en el sector.',
         tagged_trades: [],
         image: true,
         imageColor: '#2563eb',
@@ -45,10 +45,10 @@ const samplePosts = [
     },
     {
         id: 'sample-4',
-        user: 'Sarah Burke',
+        user: 'Sara López',
         avatar: 'S',
         time: 'hace 8h',
-        content: 'Just completed this custom shelving unit for a client\'s home office. Walnut and steel — a perfect combination!',
+        content: 'Acabo de terminar esta estantería a medida para el despacho de un cliente. Nogal y acero — ¡una combinación perfecta!',
         tagged_trades: [],
         image: true,
         imageColor: '#22c55e',
@@ -58,8 +58,10 @@ const samplePosts = [
 ];
 
 const Community = () => {
-    const [posts, setPosts] = useState(samplePosts);
+    const [posts, setPosts] = useState([]);
+    const [postsLoading, setPostsLoading] = useState(true);
     const [newPost, setNewPost] = useState('');
+    const [activeFilter, setActiveFilter] = useState('all');
     const [likedPosts, setLikedPosts] = useState(new Set());
     const [taggedTrades, setTaggedTrades] = useState([]);
     const [showMentionDropdown, setShowMentionDropdown] = useState(false);
@@ -71,6 +73,8 @@ const Community = () => {
     const [selectedVideo, setSelectedVideo] = useState(null);
     const [videoPreview, setVideoPreview] = useState(null);
     const [toastMsg, setToastMsg] = useState('');
+    const [lightbox, setLightbox] = useState(null); // { urls: [], index: number }
+    const filterScrollRef = useRef(null);
     const textareaRef = useRef(null);
     const fileInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -85,22 +89,36 @@ const Community = () => {
         try {
             const { data, error } = await supabase
                 .from('community_posts')
-                .select(`
-                    *,
-                    profiles:user_id ( username )
-                `)
+                .select('*, post_trades(trade)')
                 .order('created_at', { ascending: false })
-                .limit(50); // Fetch latest 50 posts
+                .limit(50);
 
-            if (!error && data) {
+            if (error) {
+                console.error('Error loading posts:', error);
+                return;
+            }
+
+            if (data && data.length > 0) {
+                // Get unique user IDs and fetch their usernames
+                const userIds = [...new Set(data.map(p => p.user_id))];
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, username')
+                    .in('id', userIds);
+
+                const usernameMap = {};
+                if (profiles) {
+                    profiles.forEach(p => { usernameMap[p.id] = p.username; });
+                }
+
                 const formattedPosts = data.map(p => ({
                     id: p.id,
                     user_id: p.user_id,
-                    user: p.profiles?.username || 'Usuario',
-                    avatar: (p.profiles?.username || 'U')[0].toUpperCase(),
+                    user: usernameMap[p.user_id] || 'Usuario',
+                    avatar: (usernameMap[p.user_id] || 'U')[0].toUpperCase(),
                     time: formatTime(p.created_at),
                     content: p.content,
-                    tagged_trades: p.tagged_trades || [],
+                    tagged_trades: (p.post_trades || []).map(pt => pt.trade),
                     image: false,
                     image_urls: p.image_urls,
                     video_url: p.video_url,
@@ -108,11 +126,14 @@ const Community = () => {
                     comments: p.comments_count || 0
                 }));
 
-                // Prepend database posts to sample posts
-                setPosts([...formattedPosts, ...samplePosts]);
+                setPosts(formattedPosts);
+            } else {
+                setPosts([]);
             }
         } catch (err) {
-            console.error(err);
+            console.error('Error loading posts:', err);
+        } finally {
+            setPostsLoading(false);
         }
     };
 
@@ -326,7 +347,6 @@ const Community = () => {
                 .insert({
                     user_id: user.id,
                     content: newPost,
-                    tagged_trades: taggedTrades.map(t => t.id),
                     image_urls: imageUrls.length > 0 ? imageUrls : null,
                     video_url: videoUrl,
                 })
@@ -335,6 +355,13 @@ const Community = () => {
 
             if (postError) {
                 console.error('Post error:', postError);
+            }
+
+            // Insert tagged trades into bridge table
+            if (!postError && postData && taggedTrades.length > 0) {
+                await supabase.from('post_trades').insert(
+                    taggedTrades.map(t => ({ post_id: postData.id, trade: t.id }))
+                );
             }
 
             // Send notifications to all professionals of tagged trades
@@ -475,9 +502,97 @@ const Community = () => {
 
                 {/* Header */}
                 <div style={{ padding: '20px 20px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <div style={{ marginBottom: '16px' }}>
                         <h1 style={{ fontSize: '22px', fontWeight: '800' }}>{t('comm_title')}</h1>
-                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('comm_new')}</span>
+                    </div>
+
+                    {/* ── Trade Filter Bar ── */}
+                    <div
+                        ref={filterScrollRef}
+                        style={{
+                            display: 'flex',
+                            gap: '8px',
+                            overflowX: 'auto',
+                            paddingBottom: '12px',
+                            marginBottom: '4px',
+                            scrollbarWidth: 'none',
+                            msOverflowStyle: 'none',
+                            WebkitOverflowScrolling: 'touch',
+                        }}
+                    >
+                        {/* "Todos" chip */}
+                        <button
+                            onClick={() => setActiveFilter('all')}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '7px 16px',
+                                borderRadius: '20px',
+                                border: activeFilter === 'all'
+                                    ? '1.5px solid var(--accent)'
+                                    : '1.5px solid var(--border-light)',
+                                background: activeFilter === 'all'
+                                    ? 'var(--accent)'
+                                    : 'var(--bg-card)',
+                                color: activeFilter === 'all'
+                                    ? '#fff'
+                                    : 'var(--text-secondary)',
+                                fontSize: '13px',
+                                fontWeight: '600',
+                                fontFamily: 'Inter, sans-serif',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                                transition: 'all 0.2s ease',
+                                boxShadow: activeFilter === 'all'
+                                    ? '0 2px 8px rgba(37, 99, 235, 0.3)'
+                                    : 'none',
+                            }}
+                        >
+                            <Filter size={13} />
+                            {t('comm_filter_all')}
+                        </button>
+
+                        {/* Trade chips */}
+                        {trades.map(trade => {
+                            const isActive = activeFilter === trade.id;
+                            return (
+                                <button
+                                    key={trade.id}
+                                    onClick={() => setActiveFilter(isActive ? 'all' : trade.id)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        padding: '7px 14px',
+                                        borderRadius: '20px',
+                                        border: isActive
+                                            ? `1.5px solid ${trade.color}`
+                                            : '1.5px solid var(--border-light)',
+                                        background: isActive
+                                            ? `${trade.color}18`
+                                            : 'var(--bg-card)',
+                                        color: isActive
+                                            ? trade.color
+                                            : 'var(--text-secondary)',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        fontFamily: 'Inter, sans-serif',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0,
+                                        transition: 'all 0.2s ease',
+                                        boxShadow: isActive
+                                            ? `0 2px 8px ${trade.color}25`
+                                            : 'none',
+                                    }}
+                                >
+                                    <trade.icon size={13} />
+                                    {t(trade.tkey) || trade.name}
+                                </button>
+                            );
+                        })}
                     </div>
 
                     {/* New post */}
@@ -790,7 +905,37 @@ const Community = () => {
 
                 {/* Posts */}
                 <div style={{ padding: '16px 20px' }}>
-                    {posts.map((post, i) => (
+                    {/* Empty state when filter has no matches */}
+                    {activeFilter !== 'all' && posts.filter(p => p.tagged_trades && p.tagged_trades.includes(activeFilter)).length === 0 && (
+                        <div style={{
+                            textAlign: 'center',
+                            padding: '40px 20px',
+                            color: 'var(--text-muted)',
+                        }}>
+                            {(() => {
+                                const trade = trades.find(t => t.id === activeFilter);
+                                return trade ? (
+                                    <>
+                                        <div style={{
+                                            width: '56px', height: '56px', borderRadius: '50%',
+                                            background: `${trade.color}15`,
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            margin: '0 auto 12px',
+                                        }}>
+                                            <trade.icon size={24} color={trade.color} />
+                                        </div>
+                                        <p style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                                            {t(trade.tkey) || trade.name}
+                                        </p>
+                                        <p style={{ fontSize: '13px' }}>
+                                            No hay publicaciones con este oficio todavía.
+                                        </p>
+                                    </>
+                                ) : null;
+                            })()}
+                        </div>
+                    )}
+                    {(activeFilter === 'all' ? posts : posts.filter(p => p.tagged_trades && p.tagged_trades.includes(activeFilter))).map((post, i) => (
                         <motion.div
                             key={post.id}
                             initial={{ opacity: 0, y: 10 }}
@@ -852,7 +997,7 @@ const Community = () => {
                                                 fontSize: '11px', fontWeight: '600'
                                             }}>
                                                 <trade.icon size={10} />
-                                                {trade.name}
+                                                {t(trade.tkey) || trade.name}
                                             </span>
                                         );
                                     })}
@@ -896,13 +1041,14 @@ const Community = () => {
                                             key={imgIdx}
                                             src={url}
                                             alt={`Post image ${imgIdx + 1}`}
+                                            onClick={() => setLightbox({ urls: post.image_urls, index: imgIdx })}
                                             style={{
                                                 width: '100%',
                                                 height: post.image_urls.length === 1 ? '220px' : '140px',
                                                 objectFit: 'cover',
                                                 borderRadius: '8px',
-                                                cursor: 'pointer',
-                                                transition: 'transform 0.2s',
+                                                cursor: 'zoom-in',
+                                                transition: 'opacity 0.2s',
                                             }}
                                             onError={(e) => {
                                                 e.target.style.display = 'none';
@@ -981,12 +1127,11 @@ const Community = () => {
                                                 return;
                                             }
 
-                                            // Check for existing conversation between these two users
-                                            const { data: existing, error: findErr } = await supabase
-                                                .from('conversations')
-                                                .select('id')
-                                                .or(`and(participant_1.eq.${user.id},participant_2.eq.${postUserId}),and(participant_1.eq.${postUserId},participant_2.eq.${user.id})`)
-                                                .maybeSingle();
+                                            // Check for existing conversation via conversation_participants
+                                            const { data: myConvs, error: findErr } = await supabase
+                                                .from('conversation_participants')
+                                                .select('conversation_id')
+                                                .eq('user_id', user.id);
 
                                             if (findErr) {
                                                 console.error('Error finding conversation:', findErr);
@@ -994,14 +1139,25 @@ const Community = () => {
                                                 return;
                                             }
 
-                                            if (existing) {
-                                                navigate(`/chat/${existing.id}`);
+                                            const myConvIds = (myConvs || []).map(c => c.conversation_id);
+                                            let existingConvId = null;
+                                            if (myConvIds.length > 0) {
+                                                const { data: shared } = await supabase
+                                                    .from('conversation_participants')
+                                                    .select('conversation_id')
+                                                    .eq('user_id', postUserId)
+                                                    .in('conversation_id', myConvIds)
+                                                    .limit(1)
+                                                    .maybeSingle();
+                                                if (shared) existingConvId = shared.conversation_id;
+                                            }
+
+                                            if (existingConvId) {
+                                                navigate(`/chat/${existingConvId}`);
                                             } else {
                                                 const { data: conv, error: createErr } = await supabase
                                                     .from('conversations')
                                                     .insert({
-                                                        participant_1: user.id,
-                                                        participant_2: postUserId,
                                                         original_post_content: post.content.slice(0, 200),
                                                         poster_name: post.user,
                                                         last_message: t('chat_reply_label'),
@@ -1017,6 +1173,11 @@ const Community = () => {
                                                 }
 
                                                 if (conv) {
+                                                    // Add both participants
+                                                    await supabase.from('conversation_participants').insert([
+                                                        { conversation_id: conv.id, user_id: user.id },
+                                                        { conversation_id: conv.id, user_id: postUserId },
+                                                    ]);
                                                     await supabase.from('messages').insert({
                                                         conversation_id: conv.id,
                                                         sender_id: user.id,
@@ -1047,6 +1208,102 @@ const Community = () => {
             </div>
 
             <BottomNav />
+
+            {/* Image Lightbox */}
+            <AnimatePresence>
+                {lightbox && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setLightbox(null)}
+                        style={{
+                            position: 'fixed', inset: 0, zIndex: 2000,
+                            background: 'rgba(0,0,0,0.96)',
+                            display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center',
+                        }}
+                    >
+                        {/* Close */}
+                        <button
+                            onClick={() => setLightbox(null)}
+                            style={{
+                                position: 'absolute', top: '16px', right: '16px',
+                                background: 'rgba(255,255,255,0.1)', border: 'none',
+                                borderRadius: '50%', width: '40px', height: '40px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer', color: '#fff', backdropFilter: 'blur(8px)',
+                                zIndex: 10,
+                            }}
+                        >
+                            <X size={20} />
+                        </button>
+
+                        {/* Counter */}
+                        {lightbox.urls.length > 1 && (
+                            <div style={{
+                                position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)',
+                                color: 'rgba(255,255,255,0.7)', fontSize: '13px', fontWeight: '600',
+                                background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px',
+                                backdropFilter: 'blur(4px)',
+                            }}>
+                                {lightbox.index + 1} / {lightbox.urls.length}
+                            </div>
+                        )}
+
+                        {/* Prev arrow */}
+                        {lightbox.index > 0 && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setLightbox(prev => ({ ...prev, index: prev.index - 1 })); }}
+                                style={{
+                                    position: 'absolute', left: '12px',
+                                    background: 'rgba(255,255,255,0.12)', border: 'none',
+                                    borderRadius: '50%', width: '44px', height: '44px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    cursor: 'pointer', color: '#fff', backdropFilter: 'blur(8px)',
+                                }}
+                            >
+                                <ChevronLeft size={24} />
+                            </button>
+                        )}
+
+                        {/* Image */}
+                        <motion.img
+                            key={lightbox.index}
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            src={lightbox.urls[lightbox.index]}
+                            alt=""
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                maxWidth: 'calc(100vw - 40px)',
+                                maxHeight: 'calc(100vh - 100px)',
+                                objectFit: 'contain',
+                                borderRadius: '12px',
+                                boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+                            }}
+                        />
+
+                        {/* Next arrow */}
+                        {lightbox.index < lightbox.urls.length - 1 && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setLightbox(prev => ({ ...prev, index: prev.index + 1 })); }}
+                                style={{
+                                    position: 'absolute', right: '12px',
+                                    background: 'rgba(255,255,255,0.12)', border: 'none',
+                                    borderRadius: '50%', width: '44px', height: '44px',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    cursor: 'pointer', color: '#fff', backdropFilter: 'blur(8px)',
+                                }}
+                            >
+                                <ChevronRight size={24} />
+                            </button>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

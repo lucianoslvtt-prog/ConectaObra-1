@@ -70,9 +70,18 @@ const translations = {
         dash_see_all: 'Ver todos',
         dash_join_pro: 'Únete como Profesional',
         dash_join_pro_desc: 'Aumenta tu visibilidad y consigue más clientes',
+        dash_searching_in: 'Buscando en',
         dash_recent: 'Vistos recientemente',
         dash_no_recent: 'Aun no has visto ningún profesional',
         dash_no_recent_desc: 'Explora categorías para encontrar profesionales',
+
+        // Hero (non-logged-in)
+        hero_title: 'Encuentra al profesional ideal para tu necesidad',
+        hero_desc: 'Compara presupuestos, lee reseñas reales y contacta directamente con profesionales verificados cerca de ti.',
+        hero_cta: 'Crear cuenta gratis',
+        hero_feat_1: 'Profesionales',
+        hero_feat_2: 'Reseñas reales',
+        hero_feat_3: 'Respuesta rápida',
 
         // Favorites
         fav_title: 'Favoritos',
@@ -118,6 +127,7 @@ const translations = {
         comm_trade_btn: '@ Oficio',
         comm_notified: '🔔 Se notificará a estos profesionales',
         comm_reply_private: 'Responder por privado',
+        comm_filter_all: 'Todos',
 
         // Chat
         chat_title: 'Mensajes',
@@ -205,6 +215,9 @@ const translations = {
         filter_near: 'Cerca de ti',
         cat_reviews: 'reseñas',
         cat_see_profile: 'Ver Perfil',
+        cat_cta_title: '¿Eres profesional de la construcción?',
+        cat_cta_desc: 'Únete a ConectaObra y empieza a recibir clientes hoy. Miles de particulares buscan profesionales como tú.',
+        cat_cta_btn: 'Registrarme como profesional',
 
         // Professional Profile
         pro_reviews: 'Reseñas',
@@ -299,6 +312,9 @@ const translations = {
         store_iron: 'Hierros',
         store_iron_desc: 'Vigas, corrugados, perfiles',
         store_near: 'tiendas cerca',
+        store_cta_title: '¿Tienes una tienda o un almacén?',
+        store_cta_desc: 'Regístrate ya y empieza a atraer clientes. Publica tu negocio para que los profesionales te encuentren.',
+        store_cta_btn: 'Registrar mi tienda',
     },
 
     en: {
@@ -371,9 +387,17 @@ const translations = {
         dash_see_all: 'See all',
         dash_join_pro: 'Join as a Professional',
         dash_join_pro_desc: 'Increase your visibility and get more clients',
+        dash_searching_in: 'Searching in',
         dash_recent: 'Recently Viewed',
         dash_no_recent: "You haven't viewed any professionals yet",
         dash_no_recent_desc: 'Browse categories to find professionals',
+
+        hero_title: 'Find the perfect professional for your renovation',
+        hero_desc: 'Compare quotes, read real reviews and contact verified professionals near you.',
+        hero_cta: 'Create free account',
+        hero_feat_1: 'Professionals',
+        hero_feat_2: 'Real reviews',
+        hero_feat_3: 'Fast response',
 
         fav_title: 'Favorites',
         fav_professionals: 'Professionals',
@@ -416,6 +440,7 @@ const translations = {
         comm_trade_btn: '@ Trade',
         comm_notified: '🔔 These professionals will be notified',
         comm_reply_private: 'Reply privately',
+        comm_filter_all: 'All',
 
         chat_title: 'Messages',
         chat_search: 'Search conversations...',
@@ -497,6 +522,9 @@ const translations = {
         cat_available: 'Available',
         cat_reviews: 'reviews',
         cat_see_profile: 'View Profile',
+        cat_cta_title: 'Are you a construction professional?',
+        cat_cta_desc: 'Join ConectaObra and start getting clients today. Thousands of homeowners are looking for professionals like you.',
+        cat_cta_btn: 'Register as a professional',
 
         pro_reviews: 'Reviews',
         pro_experience: 'Experience',
@@ -581,6 +609,9 @@ const translations = {
         store_iron: 'Iron & Steel',
         store_iron_desc: 'Beams, rebar, profiles',
         store_near: 'stores nearby',
+        store_cta_title: 'Do you own a store or warehouse?',
+        store_cta_desc: 'Sign up now and start attracting customers. List your business so professionals can find you.',
+        store_cta_btn: 'Register my store',
     },
 
     fr: {
@@ -650,9 +681,17 @@ const translations = {
         dash_see_all: 'Voir tout',
         dash_join_pro: 'Rejoignez en tant que Professionnel',
         dash_join_pro_desc: 'Augmentez votre visibilité et obtenez plus de clients',
+        dash_searching_in: 'Recherche à',
         dash_recent: 'Vus récemment',
         dash_no_recent: "Vous n'avez vu aucun professionnel",
         dash_no_recent_desc: 'Parcourez les catégories pour trouver des professionnels',
+
+        hero_title: 'Trouvez le professionnel idéal pour vos travaux',
+        hero_desc: 'Comparez les devis, lisez de vrais avis et contactez directement des professionnels vérifiés près de chez vous.',
+        hero_cta: 'Créer un compte gratuit',
+        hero_feat_1: 'Professionnels',
+        hero_feat_2: 'Avis authentiques',
+        hero_feat_3: 'Réponse rapide',
 
         fav_title: 'Favoris',
         fav_professionals: 'Professionnels',
@@ -695,6 +734,7 @@ const translations = {
         comm_trade_btn: '@ Métier',
         comm_notified: '🔔 Ces professionnels seront notifiés',
         comm_reply_private: 'Répondre en privé',
+        comm_filter_all: 'Tous',
 
         chat_title: 'Messages',
         chat_search: 'Rechercher des conversations...',
@@ -776,6 +816,9 @@ const translations = {
         cat_available: 'Disponibles',
         cat_reviews: 'avis',
         cat_see_profile: 'Voir le profil',
+        cat_cta_title: 'Vous êtes professionnel du bâtiment ?',
+        cat_cta_desc: 'Rejoignez ConectaObra et commencez à recevoir des clients dès aujourd\'hui. Des milliers de particuliers cherchent des professionnels comme vous.',
+        cat_cta_btn: 'S\'inscrire comme professionnel',
 
         pro_reviews: 'Avis',
         pro_experience: 'Expérience',
@@ -860,6 +903,9 @@ const translations = {
         store_iron: 'Fer et Acier',
         store_iron_desc: 'Poutres, armatures, profilés',
         store_near: 'magasins à proximité',
+        store_cta_title: 'Vous avez un magasin ou un entrepôt ?',
+        store_cta_desc: 'Inscrivez-vous maintenant et commencez à attirer des clients. Publiez votre commerce pour que les professionnels vous trouvent.',
+        store_cta_btn: 'Enregistrer mon magasin',
     }
 };
 

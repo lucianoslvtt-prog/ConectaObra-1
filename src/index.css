@@ -450,3 +450,8 @@ label {
 .mb-24 {
   margin-bottom: 24px;
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

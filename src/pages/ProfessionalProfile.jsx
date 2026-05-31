@@ -5,6 +5,8 @@ import { ChevronLeft, ChevronRight, MapPin, Star, Briefcase, Clock, Phone, Mail,
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
 import { trades } from '../data/categories';
+import { isOpenNow, formatDaySchedule, DAYS_CONFIG } from '../utils/businessHoursUtils';
+import { getLanguageById } from '../utils/languagesUtils';
 
 const defaultPro = {
     name: 'Marcus Thorne',
@@ -44,6 +46,8 @@ const ProfessionalProfile = () => {
     const [dbProData, setDbProData] = useState(null);
     const [portfolioImages, setPortfolioImages] = useState([]);
     const [verificationStatus, setVerificationStatus] = useState(null);
+    const [pageLoading, setPageLoading] = useState(true);
+    const [showFullSchedule, setShowFullSchedule] = useState(false);
     const { t } = useLanguage();
 
     // Load favorite state
@@ -112,7 +116,9 @@ const ProfessionalProfile = () => {
                         .maybeSingle();
                     if (verif) setVerificationStatus(verif.status);
                 } catch { /* ignore */ }
-            } catch { /* ignore */ }
+            } catch { /* ignore */ } finally {
+                setPageLoading(false);
+            }
         };
         load();
     }, [id]);
@@ -121,36 +127,20 @@ const ProfessionalProfile = () => {
     const passedPro = location.state?.pro;
     const isProRole = (dbProfile?.role === 'professional') || (passedPro?.role === 'professional');
     
-    // Extracted languages definition
-    const allLanguages = [
-        { id: 'es', name: 'Español', flag: '🇪🇸' },
-        { id: 'en', name: 'Inglés', flag: '🇬🇧' },
-        { id: 'fr', name: 'Francés', flag: '🇫🇷' },
-        { id: 'pt', name: 'Portugués', flag: '🇵🇹' },
-        { id: 'de', name: 'Alemán', flag: '🇩🇪' },
-        { id: 'it', name: 'Italiano', flag: '🇮🇹' },
-        { id: 'ro', name: 'Rumano', flag: '🇷🇴' },
-        { id: 'ar', name: 'Árabe', flag: '🇸🇦' },
-        { id: 'zh', name: 'Chino', flag: '🇨🇳' },
-        { id: 'ru', name: 'Ruso', flag: '🇷🇺' },
-        { id: 'uk', name: 'Ucraniano', flag: '🇺🇦' },
-        { id: 'pl', name: 'Polaco', flag: '🇵🇱' },
-        { id: 'nl', name: 'Holandés', flag: '🇳🇱' },
-        { id: 'sv', name: 'Sueco', flag: '🇸🇪' },
-        { id: 'no', name: 'Noruego', flag: '🇳🇴' },
-    ];
+
 
     const pro = {
         name: passedPro?.name || dbProfile?.full_name || dbProfile?.username || defaultPro.name,
         specialty: isProRole ? (passedPro?.specialty || dbProfile?.specialty || defaultPro.specialty) : null,
         location: passedPro?.location || dbProfile?.location || '',
-        languages: isProRole ? (dbProfile?.languages ? dbProfile.languages.split(',').map(l => l.trim()) : []) : [],
-        rating: realAvgRating || passedPro?.rating || defaultPro.rating,
-        reviews: realReviews.length || passedPro?.reviews || defaultPro.reviews,
+        languages: isProRole ? (Array.isArray(dbProfile?.languages) ? dbProfile.languages : []) : [],
+        rating: realAvgRating || null,
+        reviews: realReviews.length || 0,
         experience: isProRole ? (dbProData?.experience_years ?? passedPro?.experience ?? 0) : null,
         projects: isProRole ? (portfolioImages.length || passedPro?.projects || 0) : null,
         bio: isProRole ? (dbProData?.bio || dbProfile?.bio || bios[Math.abs(hashCode(id || '0')) % bios.length]) : null,
         avatar_url: passedPro?.avatar_url || dbProfile?.avatar_url || null,
+        cover_url: dbProfile?.cover_url || null,
         role: dbProfile?.role || (passedPro?.role) || 'user',
     };
 
@@ -161,16 +151,19 @@ const ProfessionalProfile = () => {
         return h;
     }
 
-    // Save to recently viewed
+    // Save to recently viewed — only after DB profile has loaded
     useEffect(() => {
+        if (!dbProfile) return; // Wait for real data before saving
         try {
+            const realName = dbProfile.full_name || dbProfile.username || '';
+            if (!realName) return; // Don't save if we still have no name
             const stored = JSON.parse(localStorage.getItem('recentPros') || '[]');
             const filtered = stored.filter(p => p.id !== id);
-            const entry = { id, name: pro.name, specialty: pro.specialty, rating: pro.rating, viewedAt: Date.now() };
+            const entry = { id, name: realName, specialty: pro.specialty, rating: pro.rating, viewedAt: Date.now() };
             const updated = [entry, ...filtered].slice(0, 10);
             localStorage.setItem('recentPros', JSON.stringify(updated));
         } catch (e) { /* ignore */ }
-    }, [id]);
+    }, [id, dbProfile]);
 
     // Update stale favorites entry with latest data from DB
     useEffect(() => {
@@ -255,6 +248,38 @@ const ProfessionalProfile = () => {
         return `hace ${Math.floor(days / 30)} mes`;
     };
 
+    if (pageLoading) {
+        return (
+            <div className="page">
+                <div className="page-content" style={{ paddingBottom: '100px' }}>
+                    {/* Back button */}
+                    <div style={{ padding: '16px 20px' }}>
+                        <button className="header-back" onClick={() => navigate(-1)}>
+                            <ChevronLeft size={22} />
+                        </button>
+                    </div>
+                    {/* Skeleton */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px 24px', gap: '16px' }}>
+                        {/* Avatar skeleton */}
+                        <div style={{ width: '90px', height: '90px', borderRadius: '50%', background: 'var(--bg-secondary)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                        {/* Name skeleton */}
+                        <div style={{ width: '140px', height: '20px', borderRadius: '8px', background: 'var(--bg-secondary)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                        <div style={{ width: '80px', height: '14px', borderRadius: '8px', background: 'var(--bg-secondary)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                    </div>
+                    {/* Stats row skeleton */}
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '40px', padding: '16px 20px' }}>
+                        {[1,2].map(i => (
+                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                                <div style={{ width: '48px', height: '28px', borderRadius: '6px', background: 'var(--bg-secondary)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                                <div style={{ width: '60px', height: '12px', borderRadius: '4px', background: 'var(--bg-secondary)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="page">
             <div className="page-content" style={{ paddingBottom: '100px' }}>
@@ -285,24 +310,39 @@ const ProfessionalProfile = () => {
                 </div>
 
                 {/* Profile header */}
-                <div style={{ textAlign: 'center', padding: '0 20px 24px' }}>
+                <div style={{
+                    textAlign: 'center', padding: '32px 20px 24px',
+                    position: 'relative', overflow: 'hidden',
+                    borderRadius: 'var(--radius)',
+                    margin: '0 0 0 0',
+                    backgroundImage: pro.cover_url ? `url(${pro.cover_url})` : 'none',
+                    backgroundSize: 'cover', backgroundPosition: 'center',
+                }}>
+                    {pro.cover_url && (
+                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(22,32,50,0.1), rgba(22,32,50,0.55))', zIndex: 0 }} />
+                    )}
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                    {/* Avatar - top right corner */}
                     <motion.div
                         initial={{ scale: 0.8, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         style={{
-                            width: '90px',
-                            height: '90px',
+                            width: '70px',
+                            height: '70px',
                             borderRadius: '50%',
                             background: pro.avatar_url ? 'none' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            margin: '0 auto 16px',
-                            fontSize: '36px',
+                            position: 'absolute',
+                            top: '-16px',
+                            right: '0px',
+                            fontSize: '28px',
                             fontWeight: '800',
                             color: 'white',
                             border: '3px solid var(--accent)',
                             overflow: 'hidden',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                         }}
                     >
                         {pro.avatar_url ? (
@@ -349,6 +389,21 @@ const ProfessionalProfile = () => {
                             ✓ {t('verify_badge')}
                         </span>
                     )}
+                    {dbProData?.business_hours && (() => {
+                        const status = isOpenNow(dbProData.business_hours, dbProData.timezone || 'Europe/Madrid');
+                        return (
+                            <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                padding: '4px 12px', borderRadius: '16px', marginLeft: '6px',
+                                fontSize: '12px', fontWeight: '600',
+                                background: status.isOpen ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                color: status.isOpen ? '#22c55e' : '#ef4444',
+                                border: `1px solid ${status.isOpen ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                            }}>
+                                {status.isOpen ? '🟢 Abierto' : '🔴 Cerrado'}
+                            </span>
+                        );
+                    })()}
                     {pro.location && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
                             <MapPin size={13} /> {pro.location}
@@ -357,7 +412,7 @@ const ProfessionalProfile = () => {
                     {pro.languages && pro.languages.length > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
                             {pro.languages.map(langId => {
-                                const lang = allLanguages.find(l => l.id === langId);
+                                const lang = getLanguageById(langId);
                                 if (!lang) return null;
                                 return (
                                     <span key={langId} style={{
@@ -391,7 +446,7 @@ const ProfessionalProfile = () => {
                             </>
                         )}
                         <div style={{ textAlign: 'center' }}>
-                            <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.rating}</p>
+                            <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.rating ?? '—'}</p>
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('prof_rating')}</p>
                         </div>
                         <div style={{ width: '1px', background: 'var(--border)' }} />
@@ -400,6 +455,7 @@ const ProfessionalProfile = () => {
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('prof_reviews_label')}</p>
                         </div>
                     </div>
+                    </div>{/* end zIndex wrapper */}
                 </div>
 
                 {/* Bio - only for professionals */}
@@ -413,6 +469,94 @@ const ProfessionalProfile = () => {
                         </div>
                     </div>
                 )}
+
+                {/* Business Hours */}
+                {dbProData?.business_hours && (() => {
+                    const status = isOpenNow(dbProData.business_hours, dbProData.timezone || 'Europe/Madrid');
+                    const now = new Date();
+                    const todayKey = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
+                    const todaySlots = dbProData.business_hours[todayKey] || [];
+                    return (
+                        <div style={{ padding: '0 20px', marginBottom: '16px' }}>
+                            <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '12px' }}>🕐 Horario</h3>
+                            <div className="card" style={{ padding: '16px' }}>
+                                {/* Status badge */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                    <span style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: '5px',
+                                        padding: '5px 14px', borderRadius: '20px',
+                                        fontSize: '13px', fontWeight: '700',
+                                        background: status.isOpen ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                                        color: status.isOpen ? '#22c55e' : '#ef4444',
+                                        border: `1px solid ${status.isOpen ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                                    }}>
+                                        {status.isOpen ? '🟢 Abierto' : '🔴 Cerrado'}
+                                        {status.label && <span style={{ fontWeight: '500', opacity: 0.8 }}>· {status.label}</span>}
+                                    </span>
+                                </div>
+                                {/* Today summary */}
+                                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
+                                        {DAYS_CONFIG.find(d => d.key === todayKey)?.label || 'Hoy'}:
+                                    </span>{' '}
+                                    {formatDaySchedule(todaySlots)}
+                                </div>
+                                {/* Expand toggle */}
+                                <button
+                                    onClick={() => setShowFullSchedule(prev => !prev)}
+                                    style={{
+                                        background: 'none', border: 'none', cursor: 'pointer',
+                                        color: 'var(--accent)', fontSize: '12px', fontWeight: '600',
+                                        padding: '4px 0', display: 'flex', alignItems: 'center', gap: '4px',
+                                    }}
+                                >
+                                    {showFullSchedule ? 'Ocultar ▴' : 'Ver horario completo ▾'}
+                                </button>
+                                {/* Full schedule table */}
+                                <AnimatePresence>
+                                    {showFullSchedule && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            style={{ overflow: 'hidden', marginTop: '10px' }}
+                                        >
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                {DAYS_CONFIG.map(day => {
+                                                    const slots = dbProData.business_hours[day.key] || [];
+                                                    const isToday = day.key === todayKey;
+                                                    const isClosed = slots.length === 0;
+                                                    return (
+                                                        <div key={day.key} style={{
+                                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                            padding: '6px 10px', borderRadius: '8px',
+                                                            background: isToday ? 'rgba(37,99,235,0.08)' : 'transparent',
+                                                        }}>
+                                                            <span style={{
+                                                                fontSize: '13px',
+                                                                fontWeight: isToday ? '700' : '500',
+                                                                color: isToday ? 'var(--accent)' : 'var(--text-primary)',
+                                                            }}>
+                                                                {day.label}
+                                                            </span>
+                                                            <span style={{
+                                                                fontSize: '13px',
+                                                                fontWeight: isToday ? '600' : '400',
+                                                                color: isClosed ? 'var(--text-muted)' : (isToday ? 'var(--accent)' : 'var(--text-secondary)'),
+                                                            }}>
+                                                                {formatDaySchedule(slots)}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {/* Portfolio - only for professionals */}
                 {isProRole && (
@@ -565,28 +709,12 @@ const ProfessionalProfile = () => {
                             </div>
                         ))
                     ) : (
-                        /* Sample reviews when no real ones exist */
-                        [
-                            { name: 'Maria García', text: 'Excelente trabajo, muy profesional y puntual. Totalmente recomendado.', rating: 5 },
-                            { name: 'Pedro López', text: 'Realizó un trabajo impecable. Precio justo y acabados perfectos.', rating: 5 },
-                        ].map((review, i) => (
-                            <div key={i} className="card" style={{ marginBottom: '10px', padding: '14px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                                    <div style={{
-                                        width: '32px', height: '32px', borderRadius: '50%',
-                                        background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: '14px', fontWeight: '700', color: 'var(--accent)'
-                                    }}>
-                                        {review.name[0]}
-                                    </div>
-                                    <div style={{ flex: 1 }}>
-                                        <p style={{ fontSize: '13px', fontWeight: '600' }}>{review.name}</p>
-                                        <div style={{ display: 'flex', gap: '2px' }}>{renderStars(review.rating)}</div>
-                                    </div>
-                                </div>
-                                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{review.text}</p>
-                            </div>
-                        ))
+                        <div style={{
+                            textAlign: 'center', padding: '40px 20px',
+                            color: 'var(--text-muted)'
+                        }}>
+                            <p style={{ fontSize: '14px' }}>Sin reseñas aún.</p>
+                        </div>
                     )}
                 </div>
 
@@ -699,15 +827,28 @@ const ProfessionalProfile = () => {
                                 return;
                             }
 
-                            // Check for existing conversation
-                            const { data: existing } = await supabase
-                                .from('conversations')
-                                .select('id')
-                                .or(`and(participant_1.eq.${user.id},participant_2.eq.${id}),and(participant_1.eq.${id},participant_2.eq.${user.id})`)
-                                .maybeSingle();
+                            // Check for existing conversation via conversation_participants
+                            const { data: myConvs } = await supabase
+                                .from('conversation_participants')
+                                .select('conversation_id')
+                                .eq('user_id', user.id);
 
-                            if (existing) {
-                                navigate(`/chat/${existing.id}`);
+                            const myConvIds = (myConvs || []).map(c => c.conversation_id);
+
+                            let existingConvId = null;
+                            if (myConvIds.length > 0) {
+                                const { data: shared } = await supabase
+                                    .from('conversation_participants')
+                                    .select('conversation_id')
+                                    .eq('user_id', id)
+                                    .in('conversation_id', myConvIds)
+                                    .limit(1)
+                                    .maybeSingle();
+                                if (shared) existingConvId = shared.conversation_id;
+                            }
+
+                            if (existingConvId) {
+                                navigate(`/chat/${existingConvId}`);
                                 return;
                             }
 
@@ -715,10 +856,8 @@ const ProfessionalProfile = () => {
                             const { data: conv, error } = await supabase
                                 .from('conversations')
                                 .insert({
-                                    participant_1: user.id,
-                                    participant_2: id,
                                     poster_name: pro.name,
-                                    original_post_content: `${pro.specialty} — ${pro.location}`,
+                                    original_post_content: `${pro.specialty ? pro.specialty.split(',').map(s => { const tr = trades.find(x => x.id === s.trim() || x.name === s.trim()); return tr ? (t(tr.tkey) || tr.name) : s.trim(); }).join(', ') : ''} — ${pro.location}`,
                                     last_message: t('chat_reply_label') || 'Contacto',
                                     last_message_at: new Date().toISOString()
                                 })
@@ -726,6 +865,11 @@ const ProfessionalProfile = () => {
                                 .single();
 
                             if (conv) {
+                                // Add both participants
+                                await supabase.from('conversation_participants').insert([
+                                    { conversation_id: conv.id, user_id: user.id },
+                                    { conversation_id: conv.id, user_id: id },
+                                ]);
                                 navigate(`/chat/${conv.id}`);
                             }
                         } catch (e) {

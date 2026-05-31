@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabase';
 import { spanishLocations } from '../data/locations';
 import { tradeGroups } from '../data/categories';
 import { useLanguage } from '../lib/LanguageContext';
+import { DAYS_CONFIG, TIMEZONES } from '../utils/businessHoursUtils';
+import { LANGUAGES } from '../utils/languagesUtils';
 
 const storeCategories = [
     { id: 'store-hardware', name: 'Ferretería', tkey: 'store_hardware', icon: Hammer, color: '#f59e0b' },
@@ -85,57 +87,12 @@ const phonePrefixes = [
     { code: '+64', country: 'Nueva Zelanda', flag: '🇳🇿' },
 ];
 
-const allLanguages = [
-    { id: 'es', name: 'Español', flag: '🇪🇸' },
-    { id: 'en', name: 'Inglés', flag: '🇬🇧' },
-    { id: 'fr', name: 'Francés', flag: '🇫🇷' },
-    { id: 'pt', name: 'Portugués', flag: '🇵🇹' },
-    { id: 'de', name: 'Alemán', flag: '🇩🇪' },
-    { id: 'it', name: 'Italiano', flag: '🇮🇹' },
-    { id: 'ro', name: 'Rumano', flag: '🇷🇴' },
-    { id: 'ar', name: 'Árabe', flag: '🇸🇦' },
-    { id: 'zh', name: 'Chino', flag: '🇨🇳' },
-    { id: 'ru', name: 'Ruso', flag: '🇷🇺' },
-    { id: 'uk', name: 'Ucraniano', flag: '🇺🇦' },
-    { id: 'pl', name: 'Polaco', flag: '🇵🇱' },
-    { id: 'nl', name: 'Neerlandés', flag: '🇳🇱' },
-    { id: 'ja', name: 'Japonés', flag: '🇯🇵' },
-    { id: 'ko', name: 'Coreano', flag: '🇰🇷' },
-    { id: 'hi', name: 'Hindi', flag: '🇮🇳' },
-    { id: 'bn', name: 'Bengalí', flag: '🇧🇩' },
-    { id: 'tr', name: 'Turco', flag: '🇹🇷' },
-    { id: 'sv', name: 'Sueco', flag: '🇸🇪' },
-    { id: 'da', name: 'Danés', flag: '🇩🇰' },
-    { id: 'no', name: 'Noruego', flag: '🇳🇴' },
-    { id: 'fi', name: 'Finlandés', flag: '🇫🇮' },
-    { id: 'el', name: 'Griego', flag: '🇬🇷' },
-    { id: 'cs', name: 'Checo', flag: '🇨🇿' },
-    { id: 'hu', name: 'Húngaro', flag: '🇭🇺' },
-    { id: 'bg', name: 'Búlgaro', flag: '🇧🇬' },
-    { id: 'hr', name: 'Croata', flag: '🇭🇷' },
-    { id: 'sk', name: 'Eslovaco', flag: '🇸🇰' },
-    { id: 'sl', name: 'Esloveno', flag: '🇸🇮' },
-    { id: 'sr', name: 'Serbio', flag: '🇷🇸' },
-    { id: 'he', name: 'Hebreo', flag: '🇮🇱' },
-    { id: 'fa', name: 'Persa', flag: '🇮🇷' },
-    { id: 'ur', name: 'Urdu', flag: '🇵🇰' },
-    { id: 'th', name: 'Tailandés', flag: '🇹🇭' },
-    { id: 'vi', name: 'Vietnamita', flag: '🇻🇳' },
-    { id: 'id', name: 'Indonesio', flag: '🇮🇩' },
-    { id: 'ms', name: 'Malayo', flag: '🇲🇾' },
-    { id: 'tl', name: 'Tagalo', flag: '🇵🇭' },
-    { id: 'sw', name: 'Suajili', flag: '🇰🇪' },
-    { id: 'am', name: 'Amhárico', flag: '🇪🇹' },
-    { id: 'ca', name: 'Catalán', flag: '🇪🇸' },
-    { id: 'gl', name: 'Gallego', flag: '🇪🇸' },
-    { id: 'eu', name: 'Euskera', flag: '🇪🇸' },
-    { id: 'qu', name: 'Quechua', flag: '🇵🇪' },
-    { id: 'gn', name: 'Guaraní', flag: '🇵🇾' },
-];
+
 
 const OnboardingPro = () => {
     const { t } = useLanguage();
     const [step, setStep] = useState(1);
+    const [isExistingPro, setIsExistingPro] = useState(false);
     const [fullName, setFullName] = useState('');
     const [phone, setPhone] = useState('');
     const [locations, setLocations] = useState(['', '', '', '', '', '']);
@@ -158,7 +115,8 @@ const OnboardingPro = () => {
     const [dniUploading, setDniUploading] = useState(false);
     const [dniUploaded, setDniUploaded] = useState(false);
     const [storeAddress, setStoreAddress] = useState(''); // physical address for stores
-    const [businessHours, setBusinessHours] = useState('');
+    const [businessHours, setBusinessHours] = useState(null);
+    const [timezone, setTimezone] = useState('Europe/Madrid');
     const [storeImageFile, setStoreImageFile] = useState(null);
     const [storeImagePreview, setStoreImagePreview] = useState(null);
     const [deliveryAvailable, setDeliveryAvailable] = useState(false);
@@ -194,7 +152,7 @@ const OnboardingPro = () => {
                             return newLocs;
                         });
                     }
-                    if (profile.languages) setSelectedLanguages(profile.languages.split(',').map(l => l.trim()));
+                    if (Array.isArray(profile.languages)) setSelectedLanguages(profile.languages);
                     if (profile.avatar_url) setAvatarPreview(profile.avatar_url);
                 }
 
@@ -206,6 +164,7 @@ const OnboardingPro = () => {
                     .maybeSingle();
 
                 if (pro) {
+                    setIsExistingPro(true); // Already subscribed — skip payment step
                     if (pro.phone) {
                         const parts = pro.phone.split(' ');
                         if (parts.length > 1) {
@@ -217,9 +176,17 @@ const OnboardingPro = () => {
                     }
                     if (pro.bio) setBio(pro.bio);
                     if (pro.experience_years !== null) setExperience(pro.experience_years.toString());
-                    if (pro.specialty) setSelectedCategories(pro.specialty.split(',').map(s => s.trim()));
+                    if (pro.specialty) {
+                        const cats = pro.specialty.split(',').map(s => s.trim());
+                        setSelectedCategories(cats);
+                        // If this is a store, load the physical address into storeAddress
+                        if (cats.some(c => c.startsWith('store-')) && pro.location) {
+                            setStoreAddress(pro.location);
+                        }
+                    }
                     // Store fields
-                    if (pro.business_hours) setBusinessHours(pro.business_hours);
+                    if (pro.business_hours && typeof pro.business_hours === 'object') setBusinessHours(pro.business_hours);
+                    if (pro.timezone) setTimezone(pro.timezone);
                     if (pro.store_image) setStoreImagePreview(pro.store_image);
                     if (pro.delivery_available !== undefined && pro.delivery_available !== null) setDeliveryAvailable(pro.delivery_available);
                     if (pro.website) setWebsite(pro.website);
@@ -303,7 +270,7 @@ const OnboardingPro = () => {
             username: fullName.trim(),
             full_name: fullName.trim(),
             specialty: specialtyStr,
-            languages: selectedLanguages.join(', '),
+            languages: selectedLanguages,
             location: locationStr || null,
         };
         if (avatarUrl) profileUpdate.avatar_url = avatarUrl;
@@ -318,16 +285,20 @@ const OnboardingPro = () => {
             .eq('user_id', user.id)
             .maybeSingle();
 
+        const isStore = selectedCategories.some(c => c.startsWith('store-'));
+        const locationValue = isStore
+            ? storeAddress.trim()
+            : locations.filter(l => l.trim()).join(', ');
+
         const proData = {
             full_name: fullName.trim(),
             phone: `${phonePrefix} ${phone}`,
-            location: selectedCategories.some(c => c.startsWith('store-'))
-                ? storeAddress.trim()
-                : locations.filter(l => l.trim()).join(', '),
+            ...(locationValue ? { location: locationValue } : {}),
             bio,
             experience_years: parseInt(experience, 10) || 0,
             specialty: specialtyStr,
-            business_hours: businessHours,
+            business_hours: businessHours && Object.values(businessHours).some(slots => slots.length > 0) ? businessHours : null,
+            timezone: timezone,
             store_image: storeImageUrl,
             delivery_available: deliveryAvailable,
             website: website,
@@ -338,7 +309,7 @@ const OnboardingPro = () => {
             const { error: updateErr } = await supabase.from('professionals').update(proData).eq('user_id', user.id);
             if (updateErr) throw new Error(`Error al actualizar profesional: ${updateErr.message}`);
         } else {
-            const { error: insertErr } = await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'active', user_id: user.id });
+            const { error: insertErr } = await supabase.from('professionals').insert({ ...proData, id: user.id, subscription_status: 'pending', user_id: user.id });
             if (insertErr) throw new Error(`Error al crear profesional: ${insertErr.message}`);
         }
 
@@ -359,9 +330,13 @@ const OnboardingPro = () => {
     };
 
     const isStoreSelected = selectedCategories.some(c => c.startsWith('store-'));
-    const stepsFlow = isStoreSelected 
-        ? ['personal', 'languages', 'categories', 'storeContact', 'subscription']
-        : ['personal', 'languages', 'categories', 'subscription'];
+    const stepsFlow = isExistingPro
+        ? (isStoreSelected
+            ? ['personal', 'languages', 'categories', 'storeContact']
+            : ['personal', 'languages', 'categories'])
+        : (isStoreSelected
+            ? ['personal', 'languages', 'categories', 'storeContact', 'subscription']
+            : ['personal', 'languages', 'categories', 'subscription']);
     const currentStepId = stepsFlow[step - 1];
     const totalSteps = stepsFlow.length;
 
@@ -517,7 +492,7 @@ const OnboardingPro = () => {
                                 {selectedLanguages.length > 0 && (
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                                         {selectedLanguages.map(langId => {
-                                            const lang = allLanguages.find(l => l.id === langId);
+                                            const lang = LANGUAGES.find(l => l.id === langId);
                                             return (
                                                 <span key={langId} style={{
                                                     display: 'inline-flex', alignItems: 'center', gap: '4px',
@@ -572,7 +547,7 @@ const OnboardingPro = () => {
                                                     style={{ fontSize: '13px', padding: '8px 10px' }}
                                                 />
                                             </div>
-                                            {allLanguages
+                                            {LANGUAGES
                                                 .filter(l => !langSearch || l.name.toLowerCase().includes(langSearch.toLowerCase()))
                                                 .map(lang => {
                                                     const isSelected = selectedLanguages.includes(lang.id);
@@ -900,16 +875,179 @@ const OnboardingPro = () => {
 
                             <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
 
-                            {/* Horario y Web */}
-                            <div style={{ display: 'flex', gap: '12px' }}>
-                                <div style={{ flex: 1.5 }}>
-                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Horario de apertura</label>
-                                    <input type="text" placeholder="Ej: L-V 09:00 - 20:00" value={businessHours} onChange={e => setBusinessHours(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+                            {/* Zona horaria */}
+                            <div style={{ marginBottom: '16px' }}>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Zona horaria</label>
+                                <select
+                                    value={timezone}
+                                    onChange={e => setTimezone(e.target.value)}
+                                    style={{
+                                        width: '100%', padding: '12px 14px', borderRadius: '10px',
+                                        border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                        color: 'var(--text-primary)', fontSize: '15px', outline: 'none',
+                                        boxSizing: 'border-box', appearance: 'none',
+                                        backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23888\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")',
+                                        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 14px center',
+                                    }}
+                                >
+                                    {TIMEZONES.map(tz => (
+                                        <option key={tz.value} value={tz.value}>{tz.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Horario de apertura */}
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: '500' }}>Horario de apertura</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const mondaySlots = (businessHours?.monday || []).map(s => ({ ...s }));
+                                            setBusinessHours(prev => {
+                                                const updated = { ...(prev || {}) };
+                                                ['tuesday', 'wednesday', 'thursday', 'friday'].forEach(d => {
+                                                    updated[d] = mondaySlots.map(s => ({ ...s }));
+                                                });
+                                                return updated;
+                                            });
+                                        }}
+                                        style={{
+                                            padding: '4px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: '600',
+                                            background: 'rgba(37,99,235,0.1)', color: 'var(--accent)',
+                                            border: '1px solid rgba(37,99,235,0.2)', cursor: 'pointer',
+                                        }}
+                                    >
+                                        Copiar Lunes a L-V
+                                    </button>
                                 </div>
-                                <div style={{ flex: 1 }}>
-                                    <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Sitio web</label>
-                                    <input type="url" placeholder="Ej: miferr.com" value={website} onChange={e => setWebsite(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
+
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {DAYS_CONFIG.map(day => {
+                                        const slots = businessHours?.[day.key] || [];
+                                        const isOpen = slots.length > 0;
+
+                                        const updateSlot = (slotIndex, field, value) => {
+                                            setBusinessHours(prev => {
+                                                const updated = { ...(prev || {}) };
+                                                const daySlots = [...(updated[day.key] || [])];
+                                                daySlots[slotIndex] = { ...daySlots[slotIndex], [field]: value };
+                                                updated[day.key] = daySlots;
+                                                return updated;
+                                            });
+                                        };
+
+                                        const toggleDay = () => {
+                                            setBusinessHours(prev => {
+                                                const updated = { ...(prev || {}) };
+                                                if (isOpen) {
+                                                    updated[day.key] = [];
+                                                } else {
+                                                    updated[day.key] = [{ open: '09:00', close: '14:00' }];
+                                                }
+                                                return updated;
+                                            });
+                                        };
+
+                                        const addSlot = () => {
+                                            setBusinessHours(prev => {
+                                                const updated = { ...(prev || {}) };
+                                                updated[day.key] = [...(updated[day.key] || []), { open: '16:00', close: '20:00' }];
+                                                return updated;
+                                            });
+                                        };
+
+                                        const removeSlot = (index) => {
+                                            setBusinessHours(prev => {
+                                                const updated = { ...(prev || {}) };
+                                                updated[day.key] = (updated[day.key] || []).filter((_, i) => i !== index);
+                                                return updated;
+                                            });
+                                        };
+
+                                        return (
+                                            <div key={day.key} style={{
+                                                padding: '10px 12px', borderRadius: '10px',
+                                                border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                            }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    <span style={{ fontSize: '13px', fontWeight: '600', width: '70px', flexShrink: 0 }}>{day.label}</span>
+                                                    {/* Toggle */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={toggleDay}
+                                                        style={{
+                                                            width: '40px', height: '22px', borderRadius: '11px', border: 'none',
+                                                            background: isOpen ? '#22c55e' : 'var(--border)',
+                                                            position: 'relative', cursor: 'pointer', transition: '0.2s', flexShrink: 0,
+                                                        }}
+                                                    >
+                                                        <div style={{
+                                                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                                                            position: 'absolute', top: '2px',
+                                                            left: isOpen ? '20px' : '2px', transition: '0.2s',
+                                                        }} />
+                                                    </button>
+                                                    {!isOpen && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Cerrado</span>}
+                                                    {isOpen && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                                                            {slots.map((slot, si) => (
+                                                                <div key={si} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                    <input
+                                                                        type="time"
+                                                                        value={slot.open}
+                                                                        onChange={e => updateSlot(si, 'open', e.target.value)}
+                                                                        style={{
+                                                                            padding: '4px 6px', borderRadius: '6px', fontSize: '13px',
+                                                                            border: '1px solid var(--border)', background: 'var(--bg-card)',
+                                                                            color: 'var(--text-primary)', width: '80px',
+                                                                        }}
+                                                                    />
+                                                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>—</span>
+                                                                    <input
+                                                                        type="time"
+                                                                        value={slot.close}
+                                                                        onChange={e => updateSlot(si, 'close', e.target.value)}
+                                                                        style={{
+                                                                            padding: '4px 6px', borderRadius: '6px', fontSize: '13px',
+                                                                            border: '1px solid var(--border)', background: 'var(--bg-card)',
+                                                                            color: 'var(--text-primary)', width: '80px',
+                                                                        }}
+                                                                    />
+                                                                    {si > 0 && (
+                                                                        <button type="button" onClick={() => removeSlot(si)} style={{
+                                                                            background: 'none', border: 'none', cursor: 'pointer',
+                                                                            color: '#ef4444', padding: '2px', display: 'flex',
+                                                                        }}>
+                                                                            <X size={14} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                            {slots.length < 2 && (
+                                                                <button type="button" onClick={addSlot} style={{
+                                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                                    color: 'var(--accent)', fontSize: '11px', fontWeight: '600',
+                                                                    padding: '2px 0', textAlign: 'left',
+                                                                }}>
+                                                                    + Añadir franja
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
+                            </div>
+
+                            <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
+
+                            {/* Sitio web */}
+                            <div>
+                                <label style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px', fontWeight: '500' }}>Sitio web</label>
+                                <input type="url" placeholder="Ej: miferr.com" value={website} onChange={e => setWebsite(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '15px', outline: 'none', boxSizing: 'border-box' }} />
                             </div>
                             
                             {/* Envío a obra */}
@@ -1256,8 +1394,18 @@ const OnboardingPro = () => {
                             } finally {
                                 setLoading(false);
                             }
-                        } else if (currentStepId === 'verification') {
-                            navigate('/dashboard');
+                        } else if (isExistingPro && step === totalSteps) {
+                            // Existing pro editing profile: just save and go back
+                            setLoading(true);
+                            try {
+                                await saveProfileData();
+                                navigate('/profile');
+                            } catch (error) {
+                                console.error(error);
+                                alert(error.message);
+                            } finally {
+                                setLoading(false);
+                            }
                         } else {
                             setStep(step + 1);
                         }
@@ -1265,7 +1413,13 @@ const OnboardingPro = () => {
                     disabled={loading || (currentStepId === 'personal' && !fullName.trim())}
                     style={{ padding: '16px', fontSize: '15px' }}
                 >
-                    {currentStepId === 'subscription' ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita') : currentStepId === 'verification' ? (dniUploaded ? t('onb_next') : t('verify_skip')) : t('onb_next')}
+                    {currentStepId === 'subscription'
+                        ? (loading ? 'Procesando...' : 'Comenzar Prueba Gratuita')
+                        : (isExistingPro && step === totalSteps)
+                            ? (loading ? 'Guardando...' : 'Guardar cambios')
+                            : currentStepId === 'verification'
+                                ? (dniUploaded ? t('onb_next') : t('verify_skip'))
+                                : t('onb_next')}
                     <ChevronRight size={18} />
                 </button>
             </div>

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Send, Image, X, Loader, Play, Square, Star, CheckCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
+import { trades } from '../data/categories';
 
 const ChatRoom = () => {
     const [messages, setMessages] = useState([]);
@@ -16,13 +17,21 @@ const ChatRoom = () => {
     const [mediaFile, setMediaFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     // Job workflow state
+    const [job, setJob] = useState(null);
     const [jobStatus, setJobStatus] = useState(null);
+    const [participantIds, setParticipantIds] = useState([]);
     const [showRatingModal, setShowRatingModal] = useState(false);
     const [ratingValue, setRatingValue] = useState(0);
     const [ratingComment, setRatingComment] = useState('');
     const [submittingRating, setSubmittingRating] = useState(false);
+    // Price proposal state
+    const [showPriceModal, setShowPriceModal] = useState(false);
+    const [priceAmount, setPriceAmount] = useState('');
+    const [priceCurrency, setPriceCurrency] = useState('EUR');
+    const [submittingPrice, setSubmittingPrice] = useState(false);
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
+    const checkTimeoutsRunning = useRef(false);
     const navigate = useNavigate();
     const { id } = useParams();
     const { t, lang } = useLanguage();
@@ -48,10 +57,28 @@ const ChatRoom = () => {
 
         if (!conv) return;
         setConversation(conv);
-        setJobStatus(conv.job_status);
 
-        const otherId = conv.participant_1 === user.id ? conv.participant_2 : conv.participant_1;
-        const isSelfChat = conv.participant_1 === conv.participant_2;
+        // Load job for this conversation
+        const { data: jobData } = await supabase
+            .from('jobs')
+            .select('*')
+            .eq('conversation_id', id)
+            .maybeSingle();
+
+        setJob(jobData);
+        setJobStatus(jobData?.status || null);
+
+        // Load participants
+        const { data: partData } = await supabase
+            .from('conversation_participants')
+            .select('user_id')
+            .eq('conversation_id', id);
+
+        const pIds = (partData || []).map(p => p.user_id);
+        setParticipantIds(pIds);
+
+        const otherId = pIds.find(pid => pid !== user.id) || user.id;
+        const isSelfChat = !pIds.find(pid => pid !== user.id);
         if (isSelfChat && conv.poster_name) {
             setOtherUser({ id: otherId, username: conv.poster_name, role: 'user' });
         } else {
@@ -77,8 +104,16 @@ const ChatRoom = () => {
             .neq('sender_id', user.id)
             .eq('read', false);
 
+        // Show rating modal if job is completed and user hasn't rated
+        if (jobData?.status === 'completed') {
+            const ratedBy = jobData.rated_by || [];
+            if (!ratedBy.includes(user.id)) {
+                setShowRatingModal(true);
+            }
+        }
+
         // Check auto-timeouts
-        await checkTimeouts(conv, user);
+        await checkTimeouts(jobData, user, pIds);
 
         const channel = supabase
             .channel(`chat-${id}`)
@@ -96,17 +131,30 @@ const ChatRoom = () => {
                 table: 'conversations',
                 filter: `id=eq.${id}`
             }, (payload) => {
-                setConversation(prev => {
-                    // Check if it JUST flipped to completed right now in this update
-                    if (prev?.job_status === 'pending_finish' && payload.new.job_status === 'completed') {
-                        const ratedBy = payload.new.job_rated_by || [];
+                setConversation(payload.new);
+            })
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'jobs',
+                filter: `conversation_id=eq.${id}`
+            }, (payload) => {
+                if (payload.eventType === 'DELETE') {
+                    setJob(null);
+                    setJobStatus(null);
+                    return;
+                }
+                const newJob = payload.new;
+                setJob(prev => {
+                    if (prev?.status === 'pending_finish' && newJob.status === 'completed') {
+                        const ratedBy = newJob.rated_by || [];
                         if (!ratedBy.includes(user.id)) {
                             setShowRatingModal(true);
                         }
                     }
-                    return payload.new;
+                    return newJob;
                 });
-                setJobStatus(payload.new.job_status);
+                setJobStatus(newJob.status);
             })
             .subscribe();
 
@@ -114,34 +162,43 @@ const ChatRoom = () => {
     };
 
     // ── Auto-timeout logic ──────────────────────────────
-    const checkTimeouts = async (conv, user) => {
-        const now = new Date();
+    const checkTimeouts = async (jobData, user, pIds) => {
+        if (!jobData) return;
+        if (checkTimeoutsRunning.current) return;
+        checkTimeoutsRunning.current = true;
 
-        // Auto-finalize: 4 days after pending_finish
-        if (conv.job_status === 'pending_finish' && conv.job_finish_deadline) {
-            const deadline = new Date(conv.job_finish_deadline);
-            if (now > deadline) {
-                await supabase.from('conversations').update({
-                    job_status: 'completed',
-                    job_finished_at: now.toISOString(),
-                    job_rating_deadline: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
-                }).eq('id', conv.id);
-                setJobStatus('completed');
+        try {
+            const now = new Date();
 
-                await insertSystemMessage('⏰ El trabajo se ha finalizado automáticamente por tiempo.', 'system_finish', user.id);
+            // Auto-finalize: 4 days after pending_finish
+            if (jobData.status === 'pending_finish' && jobData.finish_deadline) {
+                const deadline = new Date(jobData.finish_deadline);
+                if (now > deadline) {
+                    const { data: updatedJob } = await supabase.from('jobs').update({
+                        status: 'completed',
+                        finished_at: now.toISOString(),
+                        rating_deadline: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+                    }).eq('conversation_id', id).select().single();
+
+                    setJob(updatedJob);
+                    setJobStatus('completed');
+
+                    await insertSystemMessage('⏰ El trabajo se ha finalizado automáticamente por tiempo.', 'system_finish', user.id);
+                }
             }
-        }
 
-        // Auto-rating: 72h after completion
-        if (conv.job_status === 'completed' && conv.job_rating_deadline) {
-            const deadline = new Date(conv.job_rating_deadline);
-            if (now > deadline) {
-                const ratedBy = conv.job_rated_by || [];
-                const participants = [conv.participant_1, conv.participant_2];
+            // Auto-rating: 72h after completion
+            if (jobData.status === 'completed' && jobData.rating_deadline) {
+                const deadline = new Date(jobData.rating_deadline);
+                const ratedBy = jobData.rated_by || [];
+                const pendingParticipants = pIds.filter(p => !ratedBy.includes(p));
 
-                for (const pid of participants) {
-                    if (!ratedBy.includes(pid)) {
-                        const otherPid = participants.find(p => p !== pid);
+                // Only run if deadline has passed AND there are still participants without a rating
+                if (now > deadline && pendingParticipants.length > 0) {
+                    const updatedRatedBy = [...ratedBy];
+
+                    for (const pid of pendingParticipants) {
+                        const otherPid = pIds.find(p => p !== pid);
                         // Get name for auto-review
                         const { data: prof } = await supabase.from('profiles').select('full_name, username').eq('id', pid).single();
                         const name = prof?.full_name || prof?.username || 'Usuario';
@@ -151,24 +208,24 @@ const ChatRoom = () => {
                             target_reviewer_id: pid,
                             target_reviewer_name: name,
                         });
-                        ratedBy.push(pid);
+                        updatedRatedBy.push(pid);
                     }
+
+                    // Update rated_by and set rated_at if all participants have now rated
+                    const updatePayload = { rated_by: updatedRatedBy };
+                    if (updatedRatedBy.length >= pIds.length) {
+                        updatePayload.rated_at = now.toISOString();
+                    }
+                    const { data: updatedJob } = await supabase.from('jobs').update(updatePayload)
+                        .eq('conversation_id', id).select().single();
+
+                    setJob(updatedJob);
+
+                    await insertSystemMessage('⭐ Valoraciones automáticas de 5 estrellas asignadas por tiempo.', 'system_rating', user.id);
                 }
-
-                await supabase.from('conversations').update({
-                    job_rated_by: ratedBy,
-                }).eq('id', conv.id);
-
-                await insertSystemMessage('⭐ Valoraciones automáticas de 5 estrellas asignadas por tiempo.', 'system_rating', user.id);
             }
-        }
-
-        // If completed and user hasn't rated, show rating modal
-        if (conv.job_status === 'completed') {
-            const ratedBy = conv.job_rated_by || [];
-            if (!ratedBy.includes(user.id)) {
-                setShowRatingModal(true);
-            }
+        } finally {
+            checkTimeoutsRunning.current = false;
         }
     };
 
@@ -202,14 +259,15 @@ const ChatRoom = () => {
         if (!currentUser || !otherUser) return;
         const myName = await getMyName();
 
-        await supabase.from('conversations').update({
-            job_status: 'pending_start',
-            job_started_by: currentUser.id,
-            job_rated_by: [],
-        }).eq('id', id);
+        const { data: newJob } = await supabase.from('jobs').insert({
+            conversation_id: id,
+            status: 'pending_start',
+            started_by: currentUser.id,
+            rated_by: [],
+        }).select().single();
         
+        setJob(newJob);
         setJobStatus('pending_start');
-        setConversation(prev => ({ ...prev, job_status: 'pending_start', job_started_by: currentUser.id, job_rated_by: [] }));
 
         await insertSystemMessage(
             `🤝 ${myName} quiere comenzar el trabajo. ¿Aceptas?`,
@@ -219,26 +277,23 @@ const ChatRoom = () => {
 
     const handleAcceptStart = async () => {
         const now = new Date();
-        await supabase.from('conversations').update({
-            job_status: 'in_progress',
-            job_started_at: now.toISOString(),
-        }).eq('id', id);
+        const { data: updatedJob } = await supabase.from('jobs').update({
+            status: 'in_progress',
+            started_at: now.toISOString(),
+        }).eq('conversation_id', id).select().single();
         
+        setJob(updatedJob);
         setJobStatus('in_progress');
-        setConversation(prev => ({ ...prev, job_status: 'in_progress', job_started_at: now.toISOString() }));
 
         const myName = await getMyName();
         await insertSystemMessage(`✅ ${myName} ha aceptado. ¡Trabajo en curso!`, 'system_start');
     };
 
     const handleRejectStart = async () => {
-        await supabase.from('conversations').update({
-            job_status: null,
-            job_started_by: null,
-        }).eq('id', id);
+        await supabase.from('jobs').delete().eq('conversation_id', id);
         
+        setJob(null);
         setJobStatus(null);
-        setConversation(prev => ({ ...prev, job_status: null, job_started_by: null }));
 
         const myName = await getMyName();
         await insertSystemMessage(`❌ ${myName} ha rechazado la solicitud.`, 'system_start');
@@ -249,14 +304,14 @@ const ChatRoom = () => {
         const myName = await getMyName();
         const deadline = new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000).toISOString();
 
-        await supabase.from('conversations').update({
-            job_status: 'pending_finish',
-            job_finished_by: currentUser.id,
-            job_finish_deadline: deadline,
-        }).eq('id', id);
+        const { data: updatedJob } = await supabase.from('jobs').update({
+            status: 'pending_finish',
+            finished_by: currentUser.id,
+            finish_deadline: deadline,
+        }).eq('conversation_id', id).select().single();
         
+        setJob(updatedJob);
         setJobStatus('pending_finish');
-        setConversation(prev => ({ ...prev, job_status: 'pending_finish', job_finished_by: currentUser.id, job_finish_deadline: deadline }));
 
         await insertSystemMessage(
             `🏁 ${myName} quiere finalizar el trabajo. ¿Confirmas?`,
@@ -266,11 +321,13 @@ const ChatRoom = () => {
 
     const handleAcceptFinish = async () => {
         const now = new Date();
-        await supabase.from('conversations').update({
-            job_status: 'completed',
-            job_finished_at: now.toISOString(),
-            job_rating_deadline: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
-        }).eq('id', id);
+        const { data: updatedJob } = await supabase.from('jobs').update({
+            status: 'completed',
+            finished_at: now.toISOString(),
+            rating_deadline: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+        }).eq('conversation_id', id).select().single();
+
+        setJob(updatedJob);
         setJobStatus('completed');
 
         const myName = await getMyName();
@@ -281,11 +338,13 @@ const ChatRoom = () => {
     };
 
     const handleRejectFinish = async () => {
-        await supabase.from('conversations').update({
-            job_status: 'in_progress',
-            job_finished_by: null,
-            job_finish_deadline: null,
-        }).eq('id', id);
+        const { data: updatedJob } = await supabase.from('jobs').update({
+            status: 'in_progress',
+            finished_by: null,
+            finish_deadline: null,
+        }).eq('conversation_id', id).select().single();
+
+        setJob(updatedJob);
         setJobStatus('in_progress');
 
         const myName = await getMyName();
@@ -297,9 +356,8 @@ const ChatRoom = () => {
         setSubmittingRating(true);
         try {
             const myName = await getMyName();
-            const otherId = otherUser?.id || (conversation.participant_1 === currentUser.id
-                ? conversation.participant_2
-                : conversation.participant_1);
+            const otherId = otherUser?.id;
+            if (!otherId) return;
 
             await supabase.from('reviews').insert({
                 professional_id: otherId,
@@ -309,11 +367,17 @@ const ChatRoom = () => {
                 comment: ratingComment.trim() || null,
             });
 
-            // Update rated_by array
-            const currentRated = conversation.job_rated_by || [];
-            await supabase.from('conversations').update({
-                job_rated_by: [...currentRated, currentUser.id],
-            }).eq('id', id);
+            // Update rated_by array on the job
+            const currentRated = job?.rated_by || [];
+            const newRatedBy = [...currentRated, currentUser.id];
+            const updatePayload = { rated_by: newRatedBy };
+            if (newRatedBy.length >= participantIds.length) {
+                updatePayload.rated_at = new Date().toISOString();
+            }
+            const { data: updatedJob } = await supabase.from('jobs').update(updatePayload)
+                .eq('conversation_id', id).select().single();
+
+            setJob(updatedJob);
 
             setShowRatingModal(false);
             setRatingValue(0);
@@ -333,6 +397,94 @@ const ChatRoom = () => {
             .eq('id', currentUser.id)
             .single();
         return data?.full_name || data?.username || 'Usuario';
+    };
+
+    // ── Price negotiation ───────────────────────────────
+    const CURRENCY_SYMBOLS = { EUR: '€', USD: '$', GBP: '£' };
+    const getCurrencySymbol = (c) => CURRENCY_SYMBOLS[c] || c;
+
+    // Centralized parser: extracts { amount, currency } from a system_price message.
+    // Expected format: "... propone 200.00 EUR. ¿Aceptas?" or "... acordado: 200.00 EUR"
+    const PRICE_REGEX = /(\d+(?:\.\d{1,2})?)\s*(EUR|USD|GBP)/;
+    const parsePriceFromMessage = (content) => {
+        const match = content?.match(PRICE_REGEX);
+        if (!match) return null;
+        return { amount: parseFloat(match[1]), currency: match[2] };
+    };
+
+    const formatPriceDisplay = (amount, currency) => {
+        const sym = getCurrencySymbol(currency);
+        // EUR/GBP: symbol after number (200€), USD: symbol before ($200)
+        if (currency === 'USD') return `${sym}${amount}`;
+        return `${amount}${sym}`;
+    };
+
+    const handleProposePrice = async () => {
+        const amount = parseFloat(priceAmount);
+        if (isNaN(amount) || amount < 0) return;
+        setSubmittingPrice(true);
+        try {
+            const myName = await getMyName();
+            const formatted = formatPriceDisplay(amount.toFixed(2), priceCurrency);
+            await insertSystemMessage(
+                `💰 ${myName} propone ${amount.toFixed(2)} ${priceCurrency}. ¿Aceptas?`,
+                'system_price'
+            );
+            setShowPriceModal(false);
+            setPriceAmount('');
+        } catch (e) {
+            console.error('Price proposal error:', e);
+        } finally {
+            setSubmittingPrice(false);
+        }
+    };
+
+    const handleAcceptPrice = async (msg) => {
+        const parsed = parsePriceFromMessage(msg.content);
+        if (!parsed) return;
+        try {
+            const { data: updatedJob } = await supabase.from('jobs').update({
+                price_amount: parsed.amount,
+                currency: parsed.currency,
+            }).eq('conversation_id', id).select().single();
+
+            if (updatedJob) {
+                setJob(updatedJob);
+            }
+
+            const display = formatPriceDisplay(parsed.amount.toFixed(2), parsed.currency);
+            const myName = await getMyName();
+            await insertSystemMessage(
+                `✅ ${myName} ha aceptado. Precio acordado: ${parsed.amount.toFixed(2)} ${parsed.currency}.`,
+                'system_price'
+            );
+        } catch (e) {
+            console.error('Price accept error:', e);
+        }
+    };
+
+    const handleRejectPrice = async () => {
+        try {
+            const myName = await getMyName();
+            await insertSystemMessage(
+                `❌ ${myName} ha rechazado el precio propuesto.`,
+                'system_price'
+            );
+        } catch (e) {
+            console.error('Price reject error:', e);
+        }
+    };
+
+    const canRespondToPrice = (msg) => {
+        return msg.message_type === 'system_price'
+            && msg.content.includes('¿Aceptas?')
+            && msg.sender_id !== currentUser?.id
+            && !messages.some(m =>
+                m.message_type === 'system_price'
+                && m.id !== msg.id
+                && new Date(m.created_at) > new Date(msg.created_at)
+                && (m.content.includes('ha aceptado') || m.content.includes('ha rechazado'))
+            );
     };
 
     // ── Media handling ──────────────────────────────────
@@ -424,14 +576,14 @@ const ChatRoom = () => {
         return msg.message_type === 'system_start'
             && msg.content.includes('¿Aceptas?')
             && jobStatus === 'pending_start'
-            && conversation?.job_started_by !== currentUser?.id;
+            && job?.started_by !== currentUser?.id;
     };
 
     const canRespondToFinish = (msg) => {
         return msg.message_type === 'system_finish'
             && msg.content.includes('¿Confirmas?')
             && jobStatus === 'pending_finish'
-            && conversation?.job_finished_by !== currentUser?.id;
+            && job?.finished_by !== currentUser?.id;
     };
 
     // ── Job status badge for header ─────────────────────
@@ -482,6 +634,24 @@ const ChatRoom = () => {
         );
     };
 
+    // ── Translate trade IDs in original_post_content ──
+    const translateOriginalPost = (content) => {
+        if (!content) return '';
+        // Content format: "carpentry, painting, electrical — Mijas, Torremolinos"
+        const parts = content.split(' — ');
+        const tradesPart = parts[0] || '';
+        const locationPart = parts.slice(1).join(' — ');
+
+        const translatedTrades = tradesPart.split(',').map(s => {
+            const trimmed = s.trim();
+            const trade = trades.find(tr => tr.id === trimmed || tr.name.toLowerCase() === trimmed.toLowerCase());
+            if (trade) return t(trade.tkey) || trade.name;
+            return trimmed;
+        }).join(', ');
+
+        return locationPart ? `${translatedTrades} — ${locationPart}` : translatedTrades;
+    };
+
     let lastDate = '';
 
     return (
@@ -530,7 +700,48 @@ const ChatRoom = () => {
                     <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>
                         {t('chat_original_header')}
                     </p>
-                    {conversation.original_post_content}
+                    {translateOriginalPost(conversation.original_post_content)}
+                </div>
+            )}
+
+            {/* Price bar */}
+            {job && (job.price_amount != null || ['pending_start', 'in_progress'].includes(jobStatus)) && (
+                <div style={{
+                    margin: '0 20px 4px', padding: '10px 14px',
+                    background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)',
+                    borderLeft: '3px solid #22c55e',
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                }}>
+                    {job.price_amount != null && (
+                        <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '4px',
+                            padding: '4px 12px', borderRadius: '16px',
+                            background: 'rgba(34,197,94,0.12)', color: '#22c55e',
+                            fontSize: '13px', fontWeight: '700',
+                            border: '1px solid rgba(34,197,94,0.25)',
+                        }}>
+                            💰 {formatPriceDisplay(
+                                parseFloat(job.price_amount).toFixed(2),
+                                job.currency || 'EUR'
+                            )}
+                        </span>
+                    )}
+                    {['pending_start', 'in_progress'].includes(jobStatus) && (
+                        <button
+                            onClick={() => setShowPriceModal(true)}
+                            style={{
+                                marginLeft: 'auto',
+                                padding: '5px 14px', borderRadius: '20px',
+                                fontSize: '11px', fontWeight: '700',
+                                background: 'rgba(245,158,11,0.12)', color: '#f59e0b',
+                                border: '1px solid rgba(245,158,11,0.3)',
+                                cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', gap: '4px',
+                            }}
+                        >
+                            💰 {job.price_amount != null ? 'Cambiar precio' : 'Proponer precio'}
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -566,12 +777,16 @@ const ChatRoom = () => {
                                     let displayContent = msg.content;
                                     
                                     if (msg.message_type === 'system_start' && msg.content.includes('¿Aceptas?')) {
-                                        if (conversation?.job_started_by === currentUser?.id) {
+                                        if (job?.started_by === currentUser?.id) {
                                             displayContent = msg.content.replace(' quiere comenzar el trabajo. ¿Aceptas?', ' ha solicitado comenzar el trabajo.');
                                         }
                                     } else if (msg.message_type === 'system_finish' && msg.content.includes('¿Confirmas?')) {
-                                        if (conversation?.job_finished_by === currentUser?.id) {
+                                        if (job?.finished_by === currentUser?.id) {
                                             displayContent = msg.content.replace(' quiere finalizar el trabajo. ¿Confirmas?', ' ha solicitado finalizar el trabajo.');
+                                        }
+                                    } else if (msg.message_type === 'system_price' && msg.content.includes('¿Aceptas?')) {
+                                        if (msg.sender_id === currentUser?.id) {
+                                            displayContent = msg.content.replace(' ¿Aceptas?', '. Esperando respuesta...');
                                         }
                                     }
 
@@ -610,6 +825,19 @@ const ChatRoom = () => {
                                                 background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
                                             }}>✓ Confirmar</button>
                                             <button onClick={handleRejectFinish} style={{
+                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
+                                            }}>✕ Rechazar</button>
+                                        </div>
+                                    )}
+                                    {/* Action buttons for price proposal */}
+                                    {canRespondToPrice(msg) && (
+                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
+                                            <button onClick={() => handleAcceptPrice(msg)} style={{
+                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
+                                            }}>✓ Aceptar</button>
+                                            <button onClick={() => handleRejectPrice(msg)} style={{
                                                 padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
                                                 background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
                                             }}>✕ Rechazar</button>
@@ -839,6 +1067,124 @@ const ChatRoom = () => {
                                 }}
                             >
                                 Valorar más tarde (72h límite)
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Price Proposal Modal */}
+            <AnimatePresence>
+                {showPriceModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => { setShowPriceModal(false); setPriceAmount(''); setPriceCurrency('EUR'); }}
+                        style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+                            zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            padding: '20px',
+                        }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.8, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                background: 'var(--bg-secondary)', borderRadius: '20px',
+                                padding: '28px', width: '100%', maxWidth: '380px',
+                                border: '1px solid var(--border)',
+                            }}
+                        >
+                            <h3 style={{ fontSize: '18px', fontWeight: '800', textAlign: 'center', marginBottom: '6px' }}>
+                                💰 Proponer precio
+                            </h3>
+                            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '20px' }}>
+                                Acuerda un precio con {otherUser?.username || 'tu compañero'}
+                            </p>
+
+                            {/* Amount input */}
+                            <div style={{ marginBottom: '14px' }}>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>
+                                    Importe
+                                </label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={priceAmount}
+                                    onChange={(e) => setPriceAmount(e.target.value)}
+                                    placeholder="0.00"
+                                    style={{
+                                        width: '100%', padding: '12px 14px', fontSize: '20px',
+                                        fontWeight: '700', borderRadius: '12px',
+                                        textAlign: 'center',
+                                    }}
+                                />
+                            </div>
+
+                            {/* Currency selector */}
+                            <div style={{ marginBottom: '20px' }}>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>
+                                    Moneda
+                                </label>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    {['EUR', 'USD', 'GBP'].map(c => (
+                                        <button
+                                            key={c}
+                                            onClick={() => setPriceCurrency(c)}
+                                            style={{
+                                                flex: 1, padding: '10px', borderRadius: '12px',
+                                                fontSize: '14px', fontWeight: '700', cursor: 'pointer',
+                                                background: priceCurrency === c ? 'var(--accent)' : 'var(--bg-card)',
+                                                color: priceCurrency === c ? 'white' : 'var(--text-primary)',
+                                                border: priceCurrency === c ? 'none' : '1px solid var(--border)',
+                                                transition: 'all 0.2s',
+                                            }}
+                                        >
+                                            {getCurrencySymbol(c)} {c}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Preview */}
+                            {priceAmount && parseFloat(priceAmount) > 0 && (
+                                <div style={{
+                                    textAlign: 'center', padding: '10px', marginBottom: '16px',
+                                    background: 'rgba(34,197,94,0.08)', borderRadius: '12px',
+                                    border: '1px solid rgba(34,197,94,0.2)',
+                                }}>
+                                    <span style={{ fontSize: '16px', fontWeight: '700', color: '#22c55e' }}>
+                                        {formatPriceDisplay(parseFloat(priceAmount).toFixed(2), priceCurrency)}
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Submit */}
+                            <button
+                                onClick={handleProposePrice}
+                                disabled={!priceAmount || parseFloat(priceAmount) <= 0 || isNaN(parseFloat(priceAmount)) || submittingPrice}
+                                className="btn btn-primary w-full"
+                                style={{
+                                    padding: '14px', fontSize: '15px', marginBottom: '8px',
+                                    opacity: (!priceAmount || parseFloat(priceAmount) <= 0 || isNaN(parseFloat(priceAmount))) ? 0.5 : 1,
+                                }}
+                            >
+                                {submittingPrice ? 'Enviando...' : '💰 Enviar propuesta'}
+                            </button>
+
+                            <button
+                                onClick={() => { setShowPriceModal(false); setPriceAmount(''); setPriceCurrency('EUR'); }}
+                                style={{
+                                    width: '100%', padding: '10px', background: 'none',
+                                    border: 'none', color: 'var(--text-muted)', fontSize: '13px',
+                                    cursor: 'pointer', fontFamily: 'Inter',
+                                }}
+                            >
+                                Cancelar
                             </button>
                         </motion.div>
                     </motion.div>

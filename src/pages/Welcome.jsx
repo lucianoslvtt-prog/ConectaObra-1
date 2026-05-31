@@ -1,34 +1,18 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import { useLanguage } from '../lib/LanguageContext';
-import { supabase } from '../lib/supabase';
+
 import CompassIcon from '../components/CompassIcon';
 
 const Welcome = () => {
     const navigate = useNavigate();
     const { t } = useLanguage();
-    const [loading, setLoading] = useState(false);
 
-    const handleStart = async () => {
-        setLoading(true);
-        try {
-            const { error } = await supabase.auth.signInWithPassword({
-                email: 'lucianose21@gmail.com',
-                password: 'luciano'
-            });
-            if (error) {
-                // fallback: just go to auth page
-                navigate('/auth');
-            } else {
-                navigate('/dashboard');
-            }
-        } catch {
-            navigate('/auth');
-        } finally {
-            setLoading(false);
-        }
+
+    const handleStart = () => {
+        navigate('/auth');
     };
 
     return (

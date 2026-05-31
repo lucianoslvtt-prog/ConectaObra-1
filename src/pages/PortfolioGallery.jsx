@@ -296,7 +296,7 @@ function PortfolioGallery() {
     const isVideo = (url) => url && url.match(/\.(mp4|mov|webm|avi)$/i);
 
     return (
-        <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
+        <div style={{ height: '100vh', overflowY: 'auto', background: 'var(--bg-primary)' }}>
             {/* Header */}
             <div style={{
                 position: 'sticky', top: 0, zIndex: 10,

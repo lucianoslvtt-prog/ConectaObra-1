@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Settings, LogOut, MapPin, Star, Briefcase, Camera, Edit2, ChevronRight, Image, Shield } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { LogOut, MapPin, Star, Briefcase, Camera, Edit2, ChevronRight, Image, Shield, Trash2, X, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { useLanguage } from '../lib/LanguageContext';
 import { trades } from '../data/categories';
+import { getLanguageById } from '../utils/languagesUtils';
 
 const Profile = () => {
     const [profile, setProfile] = useState(null);
@@ -21,6 +22,10 @@ const Profile = () => {
     const coverInputRef = useRef(null);
     const navigate = useNavigate();
     const { t } = useLanguage();
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [deletingAccount, setDeletingAccount] = useState(false);
+    const [deleteError, setDeleteError] = useState(null);
 
     useEffect(() => {
         fetchProfile();
@@ -84,13 +89,12 @@ const Profile = () => {
                     const avg = reviewsData.reduce((sum, r) => sum + (r.rating || 0), 0) / reviewsData.length;
                     setAvgRating(avg.toFixed(1));
                 } else {
-                    // Fallback: use sample reviews count (same as MyReviews page)
-                    setReviewCount(4);
-                    setAvgRating('4.8');
+                    setReviewCount(0);
+                    setAvgRating(0);
                 }
             } catch {
-                setReviewCount(4);
-                setAvgRating('4.8');
+                setReviewCount(0);
+                setAvgRating(0);
             }
 
             // Load verification status
@@ -113,6 +117,37 @@ const Profile = () => {
     const handleLogout = async () => {
         await supabase.auth.signOut();
         navigate('/');
+    };
+
+    const handleDeleteAccount = async () => {
+        if (deleteConfirmText !== 'ELIMINAR') return;
+        setDeletingAccount(true);
+        setDeleteError(null);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) throw new Error('No session');
+
+            const response = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-account`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${session.access_token}`,
+                        'Content-Type': 'application/json',
+                    },
+                }
+            );
+
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Error al eliminar la cuenta');
+
+            await supabase.auth.signOut();
+            navigate('/');
+        } catch (err) {
+            setDeleteError(err.message || 'Error al eliminar la cuenta. Inténtalo de nuevo.');
+        } finally {
+            setDeletingAccount(false);
+        }
     };
 
     const handleAvatarUpload = async (e) => {
@@ -204,23 +239,20 @@ const Profile = () => {
             <div className="page-content">
                 {/* Header */}
                 <div style={{ padding: '20px 20px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ marginBottom: '0' }}>
                         <h1 style={{ fontSize: '22px', fontWeight: '800' }}>{t('nav_profile')}</h1>
-                        <button style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                            <Settings size={20} />
-                        </button>
                     </div>
                 </div>
 
                 {/* Profile card */}
                 <div style={{ padding: '24px 20px' }}>
                     <div className="card" style={{ 
-                        textAlign: 'center', padding: '28px 20px', position: 'relative', overflow: 'hidden',
+                        textAlign: 'center', padding: '48px 20px', position: 'relative', overflow: 'hidden', minHeight: '220px',
                         backgroundImage: profile?.cover_url ? `url(${profile.cover_url})` : 'none',
                         backgroundSize: 'cover', backgroundPosition: 'center',
                     }}>
                         {profile?.cover_url && (
-                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(22, 32, 50, 0.4), rgba(22, 32, 50, 0.95))', zIndex: 0 }} />
+                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(22, 32, 50, 0.1), rgba(22, 32, 50, 0.55))', zIndex: 0 }} />
                         )}
                         <input
                             ref={coverInputRef}
@@ -245,27 +277,10 @@ const Profile = () => {
                         </button>
                         <div style={{ position: 'relative', zIndex: 1 }}>
                             {/* Languages spoken */}
-                        {profile?.languages && (
+                        {profile?.languages && Array.isArray(profile.languages) && profile.languages.length > 0 && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', marginBottom: '16px' }}>
-                                {profile.languages.split(',').map(l => l.trim()).filter(Boolean).map(langId => {
-                                    const langData = {
-                                        es: { name: 'Español', flag: '🇪🇸' }, en: { name: 'Inglés', flag: '🇬🇧' },
-                                        fr: { name: 'Francés', flag: '🇫🇷' }, pt: { name: 'Portugués', flag: '🇵🇹' },
-                                        de: { name: 'Alemán', flag: '🇩🇪' }, it: { name: 'Italiano', flag: '🇮🇹' },
-                                        ro: { name: 'Rumano', flag: '🇷🇴' }, ar: { name: 'Árabe', flag: '🇸🇦' },
-                                        zh: { name: 'Chino', flag: '🇨🇳' }, ru: { name: 'Ruso', flag: '🇷🇺' },
-                                        uk: { name: 'Ucraniano', flag: '🇺🇦' }, pl: { name: 'Polaco', flag: '🇵🇱' },
-                                        nl: { name: 'Neerlandés', flag: '🇳🇱' }, ja: { name: 'Japonés', flag: '🇯🇵' },
-                                        ko: { name: 'Coreano', flag: '🇰🇷' }, tr: { name: 'Turco', flag: '🇹🇷' },
-                                        ca: { name: 'Catalán', flag: '🇪🇸' }, gl: { name: 'Gallego', flag: '🇪🇸' },
-                                        eu: { name: 'Euskera', flag: '🇪🇸' }, hi: { name: 'Hindi', flag: '🇮🇳' },
-                                        sv: { name: 'Sueco', flag: '🇸🇪' }, da: { name: 'Danés', flag: '🇩🇰' },
-                                        no: { name: 'Noruego', flag: '🇳🇴' }, fi: { name: 'Finlandés', flag: '🇫🇮' },
-                                        el: { name: 'Griego', flag: '🇬🇷' }, cs: { name: 'Checo', flag: '🇨🇿' },
-                                        hu: { name: 'Húngaro', flag: '🇭🇺' }, bg: { name: 'Búlgaro', flag: '🇧🇬' },
-                                        hr: { name: 'Croata', flag: '🇭🇷' }, he: { name: 'Hebreo', flag: '🇮🇱' },
-                                    };
-                                    const info = langData[langId];
+                                {profile.languages.map(langId => {
+                                    const info = getLanguageById(langId);
                                     return (
                                         <span key={langId} style={{
                                             display: 'inline-flex', alignItems: 'center', gap: '4px',
@@ -281,7 +296,8 @@ const Profile = () => {
                                 })}
                             </div>
                         )}
-                        <div style={{ position: 'relative', display: 'inline-block' }}>
+                        {/* Avatar - top right corner */}
+                        <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 3 }}>
                             <input
                                 ref={avatarInputRef}
                                 type="file"
@@ -290,21 +306,21 @@ const Profile = () => {
                                 style={{ display: 'none' }}
                             />
                             <div style={{
-                                width: '80px',
-                                height: '80px',
+                                width: '65px',
+                                height: '65px',
                                 borderRadius: '50%',
                                 background: profile?.avatar_url ? 'none' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                fontSize: '32px',
+                                fontSize: '26px',
                                 fontWeight: '800',
                                 color: 'white',
-                                margin: '0 auto 16px',
                                 border: '3px solid var(--accent)',
                                 overflow: 'hidden',
                                 opacity: avatarUploading ? 0.6 : 1,
                                 transition: 'opacity 0.3s',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                             }}>
                                 {profile?.avatar_url ? (
                                     <img
@@ -322,10 +338,10 @@ const Profile = () => {
                                 disabled={avatarUploading}
                                 style={{
                                     position: 'absolute',
-                                    bottom: '12px',
-                                    right: '-4px',
-                                    width: '28px',
-                                    height: '28px',
+                                    bottom: '-2px',
+                                    right: '-2px',
+                                    width: '24px',
+                                    height: '24px',
                                     borderRadius: '50%',
                                     background: 'var(--accent)',
                                     border: '2px solid var(--bg-card)',
@@ -334,16 +350,14 @@ const Profile = () => {
                                     justifyContent: 'center',
                                     cursor: 'pointer'
                                 }}>
-                                <Camera size={12} color="white" />
+                                <Camera size={10} color="white" />
                             </button>
                         </div>
 
                         <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '4px' }}>
                             {profile?.username || 'Usuario'}
                         </h2>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '8px' }}>
-                            {profile?.email}
-                        </p>
+                        {/* Email hidden for privacy */}
                         {profile?.specialty && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', marginBottom: '8px' }}>
                                 {profile.specialty.split(',').map(s => s.trim()).filter(Boolean).map(specId => {
@@ -417,7 +431,7 @@ const Profile = () => {
                 {/* Menu items */}
                 <div style={{ padding: '24px 20px' }}>
                     {[
-                        { icon: Edit2, label: t('prof_edit'), desc: '', path: '/onboarding-pro' },
+                        { icon: Edit2, label: t('prof_edit'), desc: '', path: profile?.role === 'professional' ? '/onboarding-pro' : '/edit-profile-particular' },
                         { icon: MapPin, label: t('prof_location'), desc: profile?.location || t('prof_location_desc'), path: '/location-settings' },
                         { icon: Star, label: t('prof_reviews_menu'), desc: t('prof_reviews_desc'), path: '/my-reviews' },
                         { icon: Briefcase, label: t('prof_projects_menu'), desc: t('prof_projects_desc'), path: '/my-projects' },
@@ -456,7 +470,7 @@ const Profile = () => {
                 </div>
 
                 {/* Logout */}
-                <div style={{ padding: '0 20px 100px' }}>
+                <div style={{ padding: '0 20px 16px' }}>
                     <button
                         className="btn w-full"
                         onClick={handleLogout}
@@ -470,6 +484,171 @@ const Profile = () => {
                         <LogOut size={18} /> {t('prof_logout')}
                     </button>
                 </div>
+
+                {/* Delete Account */}
+                <div style={{ padding: '0 20px 100px' }}>
+                    <button
+                        className="btn w-full"
+                        onClick={() => { setShowDeleteModal(true); setDeleteConfirmText(''); setDeleteError(null); }}
+                        style={{
+                            background: 'rgba(100,116,139,0.08)',
+                            color: 'var(--text-muted)',
+                            border: '1px solid rgba(100,116,139,0.15)',
+                            padding: '12px',
+                            fontSize: '13px',
+                        }}
+                    >
+                        <Trash2 size={15} /> Eliminar cuenta
+                    </button>
+                </div>
+
+                {/* Delete Account Modal */}
+                <AnimatePresence>
+                    {showDeleteModal && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => !deletingAccount && setShowDeleteModal(false)}
+                            style={{
+                                position: 'fixed', inset: 0, zIndex: 9999,
+                                background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                padding: '20px',
+                            }}
+                        >
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.9, opacity: 0 }}
+                                onClick={e => e.stopPropagation()}
+                                style={{
+                                    background: 'var(--bg-card)', borderRadius: '16px',
+                                    padding: '28px 24px', width: '100%', maxWidth: '380px',
+                                    border: '1px solid var(--border)',
+                                    boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                                }}
+                            >
+                                {/* Close button */}
+                                <button
+                                    onClick={() => !deletingAccount && setShowDeleteModal(false)}
+                                    style={{
+                                        position: 'absolute', top: '12px', right: '12px',
+                                        background: 'none', border: 'none', cursor: 'pointer',
+                                        color: 'var(--text-muted)', padding: '4px',
+                                    }}
+                                    disabled={deletingAccount}
+                                >
+                                    <X size={18} />
+                                </button>
+
+                                {/* Icon */}
+                                <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                                    <div style={{
+                                        width: '52px', height: '52px', borderRadius: '50%',
+                                        background: 'rgba(239,68,68,0.12)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        margin: '0 auto',
+                                    }}>
+                                        <AlertTriangle size={26} color="#ef4444" />
+                                    </div>
+                                </div>
+
+                                {/* Title */}
+                                <h3 style={{ fontSize: '18px', fontWeight: '700', textAlign: 'center', marginBottom: '12px' }}>
+                                    ⚠️ ¿Eliminar tu cuenta?
+                                </h3>
+
+                                {/* Warning text */}
+                                <p style={{
+                                    fontSize: '13px', color: 'var(--text-secondary)',
+                                    textAlign: 'center', lineHeight: 1.6, marginBottom: '20px',
+                                }}>
+                                    Esta acción es <strong style={{ color: '#ef4444' }}>permanente e irreversible</strong>.
+                                    Tus datos personales, publicaciones, reseñas y archivos serán eliminados.
+                                    Los mensajes enviados se anonimizarán.
+                                </p>
+
+                                {/* Confirmation input */}
+                                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', display: 'block', marginBottom: '8px' }}>
+                                    Escribe <span style={{ color: '#ef4444', fontFamily: 'monospace', fontWeight: '700' }}>ELIMINAR</span> para confirmar:
+                                </label>
+                                <input
+                                    type="text"
+                                    value={deleteConfirmText}
+                                    onChange={e => setDeleteConfirmText(e.target.value)}
+                                    placeholder="Escribe aquí..."
+                                    disabled={deletingAccount}
+                                    autoComplete="off"
+                                    style={{
+                                        width: '100%', padding: '12px 14px', borderRadius: '10px',
+                                        border: `1px solid ${deleteConfirmText === 'ELIMINAR' ? 'rgba(239,68,68,0.5)' : 'var(--border)'}`,
+                                        background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                                        fontSize: '15px', fontFamily: 'monospace', fontWeight: '600',
+                                        letterSpacing: '2px', textAlign: 'center',
+                                        outline: 'none', marginBottom: '8px',
+                                        transition: 'border-color 0.2s',
+                                    }}
+                                />
+
+                                {/* Error message */}
+                                {deleteError && (
+                                    <p style={{
+                                        fontSize: '12px', color: '#ef4444', textAlign: 'center',
+                                        marginBottom: '8px', padding: '8px',
+                                        background: 'rgba(239,68,68,0.08)', borderRadius: '8px',
+                                    }}>
+                                        {deleteError}
+                                    </p>
+                                )}
+
+                                {/* Action buttons */}
+                                <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                                    <button
+                                        onClick={() => setShowDeleteModal(false)}
+                                        disabled={deletingAccount}
+                                        className="btn"
+                                        style={{
+                                            flex: 1, padding: '12px',
+                                            background: 'var(--bg-primary)',
+                                            color: 'var(--text-primary)',
+                                            border: '1px solid var(--border)',
+                                        }}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleDeleteAccount}
+                                        disabled={deleteConfirmText !== 'ELIMINAR' || deletingAccount}
+                                        className="btn"
+                                        style={{
+                                            flex: 1, padding: '12px',
+                                            background: deleteConfirmText === 'ELIMINAR' ? '#ef4444' : 'rgba(239,68,68,0.15)',
+                                            color: deleteConfirmText === 'ELIMINAR' ? 'white' : 'rgba(239,68,68,0.4)',
+                                            border: 'none',
+                                            opacity: deletingAccount ? 0.6 : 1,
+                                            transition: 'all 0.2s',
+                                        }}
+                                    >
+                                        {deletingAccount ? (
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <span className="spinner" style={{
+                                                    width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)',
+                                                    borderTopColor: 'white', borderRadius: '50%',
+                                                    animation: 'spin 0.8s linear infinite', display: 'inline-block',
+                                                }} /> Eliminando...
+                                            </span>
+                                        ) : (
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                                                <Trash2 size={14} /> Eliminar mi cuenta
+                                            </span>
+                                        )}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
             <BottomNav />

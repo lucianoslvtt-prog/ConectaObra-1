@@ -5,6 +5,7 @@ import { ChevronLeft, MapPin, Star, Phone, Clock, Navigation, Heart } from 'luci
 import BottomNav from '../components/BottomNav';
 import { useLanguage } from '../lib/LanguageContext';
 import { supabase } from '../lib/supabase';
+import { isOpenNow } from '../utils/businessHoursUtils';
 
 // Map from route categoryId to store- specialty ids
 const categoryMap = {
@@ -57,7 +58,7 @@ const StoreList = () => {
             const { data, error } = await supabase
                 .from('professionals')
                 .select(`
-                    id, full_name, phone, location, bio, business_hours,
+                    id, user_id, full_name, phone, location, bio, business_hours, timezone,
                     profiles:user_id ( username, avatar_url, full_name )
                 `)
                 .ilike('specialty', `%${specialtyId}%`);
@@ -65,12 +66,15 @@ const StoreList = () => {
             if (!error && data) {
                 setStores(data.map(s => ({
                     id: s.id,
+                    userId: s.user_id,
                     name: s.full_name || s.profiles?.full_name || s.profiles?.username || 'Tienda',
                     address: s.location || '',
                     phone: s.phone || '',
                     rating: null,
                     reviews: 0,
-                    hours: s.business_hours || '',
+                    hours: s.business_hours && typeof s.business_hours === 'object'
+                        ? isOpenNow(s.business_hours, s.timezone || 'Europe/Madrid')
+                        : null,
                     distance: '',
                 })));
             }
@@ -142,8 +146,9 @@ const StoreList = () => {
                                 initial={{ opacity: 0, y: 12 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: i * 0.06 }}
-                                className="card"
-                                style={{ marginBottom: '12px', padding: '18px' }}
+                                className="card card-hover"
+                                onClick={() => store.userId && navigate(`/professional/${store.userId}`)}
+                                style={{ marginBottom: '12px', padding: '18px', cursor: 'pointer' }}
                             >
                                 {/* Store name & rating */}
                                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
@@ -174,14 +179,14 @@ const StoreList = () => {
                                 {/* Info row */}
                                 {(store.hours || store.distance || store.reviews > 0) && (
                                     <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                                        {store.hours && <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={12} /> {store.hours}</span>}
+                                        {store.hours && store.hours.label && <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>{store.hours.isOpen ? '🟢' : '🔴'} {store.hours.isOpen ? 'Abierto' : 'Cerrado'}{store.hours.label ? ` · ${store.hours.label}` : ''}</span>}
                                         {store.distance && <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Navigation size={12} /> {store.distance}</span>}
                                         {store.reviews > 0 && <span>{store.reviews} {t('store_reviews')}</span>}
                                     </div>
                                 )}
 
                                 {/* Action buttons */}
-                                <div style={{ display: 'flex', gap: '8px' }}>
+                                <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
                                     {store.phone ? (
                                         <a href={`tel:${store.phone.replace(/\s/g, '')}`} className="btn btn-primary" style={{ flex: 1, padding: '10px', fontSize: '13px' }}>
                                             <Phone size={14} /> {t('store_call')}
@@ -210,6 +215,63 @@ const StoreList = () => {
                             </motion.div>
                         ))
                     )}
+
+                    {/* CTA for store owners */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                        style={{
+                            marginTop: '24px',
+                            borderRadius: '16px',
+                            background: 'linear-gradient(135deg, #0c1a30 0%, #162d50 50%, #1a3a6a 100%)',
+                            border: '1px solid rgba(37,99,235,0.2)',
+                            padding: '24px 20px',
+                            textAlign: 'center',
+                            position: 'relative',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        <div style={{
+                            position: 'absolute', top: '-30px', right: '-30px',
+                            width: '120px', height: '120px',
+                            background: 'radial-gradient(circle, rgba(37,99,235,0.2) 0%, transparent 70%)',
+                            borderRadius: '50%', pointerEvents: 'none',
+                        }} />
+                        <div style={{ position: 'relative', zIndex: 1 }}>
+                            <div style={{
+                                width: '52px', height: '52px', borderRadius: '14px',
+                                background: 'rgba(245,158,11,0.15)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                margin: '0 auto 14px', fontSize: '24px',
+                            }}>
+                                🏪
+                            </div>
+                            <h3 style={{
+                                fontSize: '16px', fontWeight: '700', color: '#ffffff',
+                                marginBottom: '8px', lineHeight: 1.4,
+                            }}>
+                                {t('store_cta_title')}
+                            </h3>
+                            <p style={{
+                                fontSize: '13px', color: 'rgba(255,255,255,0.6)',
+                                lineHeight: 1.5, marginBottom: '18px', maxWidth: '280px',
+                                margin: '0 auto 18px',
+                            }}>
+                                {t('store_cta_desc')}
+                            </p>
+                            <button
+                                onClick={() => navigate('/onboarding-pro')}
+                                className="btn btn-primary"
+                                style={{
+                                    padding: '12px 28px', fontSize: '14px',
+                                    boxShadow: '0 4px 16px rgba(37,99,235,0.3)',
+                                }}
+                            >
+                                {t('store_cta_btn')}
+                            </button>
+                        </div>
+                    </motion.div>
                 </div>
             </div>
             <BottomNav />

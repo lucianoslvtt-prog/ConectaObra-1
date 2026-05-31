@@ -59,6 +59,25 @@ const Auth = () => {
 
     // ─── Social login ───
 
+    const handleGoogleLogin = async () => {
+        setLoading(true);
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: window.location.origin + '/dashboard',
+                    queryParams: {
+                        prompt: 'select_account'
+                    }
+                },
+            });
+            if (error) throw error;
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message });
+            setLoading(false);
+        }
+    };
+
     const handleAppleLogin = async () => {
         setLoading(true);
         try {
@@ -140,13 +159,14 @@ const Auth = () => {
 
         try {
             if (mode === 'register') {
-                const { data: existingUser } = await supabase
+                // Check for duplicate username
+                const { data: existingUsername } = await supabase
                     .from('profiles')
                     .select('id')
                     .ilike('username', username.trim())
                     .maybeSingle();
 
-                if (existingUser) {
+                if (existingUsername) {
                     setMessage({ type: 'error', text: 'Este nombre de usuario ya está en uso. Por favor, elige otro.' });
                     setLoading(false);
                     return;
@@ -161,24 +181,34 @@ const Auth = () => {
                 });
                 if (error) throw error;
 
+                // Supabase returns a fake success with empty identities for duplicate emails
+                // (to prevent email enumeration). Detect this and show proper error.
+                if (data?.user?.identities?.length === 0) {
+                    setMessage({ type: 'error', text: 'Este correo electrónico ya está registrado. ¿Quieres iniciar sesión?' });
+                    setLoading(false);
+                    return;
+                }
+
                 if (data.session) {
                     navigate(role === 'professional' ? '/onboarding-pro' : '/dashboard');
                     return;
                 }
 
-                const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-                if (loginError) {
-                    setMessage({ type: 'success', text: '¡Cuenta creada! Revisa tu email para confirmar tu cuenta.' });
-                } else if (loginData.session) {
-                    navigate(role === 'professional' ? '/onboarding-pro' : '/dashboard');
-                }
+                setMessage({ type: 'success', text: '¡Cuenta creada! Revisa tu email para confirmar tu cuenta.' });
             } else if (mode === 'login') {
                 const { data, error } = await supabase.auth.signInWithPassword({ email, password });
                 if (error) throw error;
                 if (data.session) navigate('/dashboard');
             }
         } catch (error) {
-            setMessage({ type: 'error', text: error.message });
+            // Translate common Supabase errors to Spanish
+            let errorMsg = error.message;
+            if (/user already registered/i.test(errorMsg) || /already been registered/i.test(errorMsg)) {
+                errorMsg = 'Este correo electrónico ya está registrado. ¿Quieres iniciar sesión?';
+            } else if (/email.*invalid/i.test(errorMsg)) {
+                errorMsg = 'El correo electrónico no es válido.';
+            }
+            setMessage({ type: 'error', text: errorMsg });
         } finally {
             setLoading(false);
         }
@@ -327,7 +357,7 @@ const Auth = () => {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="header-back"
-                onClick={() => navigate('/')}
+                onClick={() => navigate(-1)}
                 style={{ marginBottom: '24px', padding: '8px 0' }}
             >
                 <ChevronLeft size={22} />
@@ -367,6 +397,46 @@ const Auth = () => {
                 {/* ── Social login buttons ── */}
                 {mode !== 'register' && (
                     <div style={{ marginBottom: '24px' }}>
+                        <button
+                            type="button"
+                            onClick={handleGoogleLogin}
+                            disabled={loading}
+                            style={{
+                                width: '100%',
+                                padding: '14px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '12px',
+                                background: 'var(--bg-secondary)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 'var(--radius)',
+                                color: 'var(--text-primary)',
+                                fontSize: '15px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                transition: 'var(--transition)',
+                                fontFamily: 'Inter, sans-serif'
+                            }}
+                            onMouseOver={(e) => {
+                                e.currentTarget.style.background = 'var(--bg-hover)';
+                                e.currentTarget.style.borderColor = 'var(--border-hover)';
+                            }}
+                            onMouseOut={(e) => {
+                                e.currentTarget.style.background = 'var(--bg-secondary)';
+                                e.currentTarget.style.borderColor = 'var(--border)';
+                            }}
+                        >
+                            <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                                <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
+                                    <path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z"/>
+                                    <path fill="#34A853" d="M -14.754 63.239 C -11.514 63.239 -8.804 62.159 -6.824 60.329 L -10.684 57.329 C -11.764 58.049 -13.134 58.489 -14.754 58.489 C -17.884 58.489 -20.534 56.369 -21.484 53.529 L -25.464 53.529 L -25.464 56.619 C -23.494 60.539 -19.444 63.239 -14.754 63.239 Z"/>
+                                    <path fill="#FBBC05" d="M -21.484 53.529 C -21.734 52.809 -21.864 52.039 -21.864 51.239 C -21.864 50.439 -21.724 49.669 -21.484 48.949 L -21.484 45.859 L -25.464 45.859 C -26.284 47.479 -26.754 49.299 -26.754 51.239 C -26.754 53.179 -26.284 54.999 -25.464 56.619 L -21.484 53.529 Z"/>
+                                    <path fill="#EA4335" d="M -14.754 43.989 C -12.984 43.989 -11.404 44.599 -10.154 45.789 L -6.734 42.369 C -8.804 40.429 -11.514 39.239 -14.754 39.239 C -19.444 39.239 -23.494 41.939 -25.464 45.859 L -21.484 48.949 C -20.534 46.109 -17.884 43.989 -14.754 43.989 Z"/>
+                                </g>
+                            </svg>
+                            {loading ? 'Cargando...' : 'Entrar con Google'}
+                        </button>
 
                         {/* Divider */}
                         <div style={{

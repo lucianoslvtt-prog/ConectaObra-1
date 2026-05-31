@@ -139,7 +139,6 @@ const MyProjects = () => {
                 .insert({
                     user_id: user.id,
                     content: newPost,
-                    tagged_trades: [],
                     image_urls: imageUrls.length > 0 ? imageUrls : null,
                 })
                 .select()

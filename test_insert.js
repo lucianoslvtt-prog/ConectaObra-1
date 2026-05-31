@@ -23,7 +23,6 @@ async function test() {
     .insert({
       user_id: user.id,
       content: '',
-      tagged_trades: [],
       image_urls: ['https://example.com/image.jpg'],
     })
     .select()

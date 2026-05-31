@@ -5,13 +5,6 @@ import { ChevronLeft, Star, MessageSquare, Send, CornerDownRight } from 'lucide-
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
 
-// Sample reviews for demo (shown when no real reviews exist)
-const sampleReviews = [
-    { id: 's1', name: 'María García', rating: 5, text: 'Excelente trabajo, muy profesional y puntual. Totalmente recomendado.', time: 'hace 3d', reply: null },
-    { id: 's2', name: 'Pedro López', rating: 5, text: 'Realizó un trabajo impecable. Precio justo y acabados perfectos.', time: 'hace 1 sem', reply: null },
-    { id: 's3', name: 'Laura Torres', rating: 4, text: 'Buen trabajo en general. Llegó un poco tarde pero el resultado fue muy bueno.', time: 'hace 2 sem', reply: null },
-    { id: 's4', name: 'Carlos Ruiz', rating: 5, text: 'Muy contento con el resultado. Sin duda volveré a contratar sus servicios.', time: 'hace 1 mes', reply: null },
-];
 
 const MyReviews = () => {
     const [reviews, setReviews] = useState([]);
@@ -55,20 +48,13 @@ const MyReviews = () => {
                 const avg = mapped.reduce((sum, r) => sum + r.rating, 0) / mapped.length;
                 setAvgRating(avg.toFixed(1));
             } else {
-                // Use sample reviews with saved replies
-                const withReplies = sampleReviews.map(r => ({
-                    ...r,
-                    reply: savedReplies[r.id] || null,
-                }));
-                setReviews(withReplies);
-                const avg = withReplies.reduce((sum, r) => sum + r.rating, 0) / withReplies.length;
-                setAvgRating(avg.toFixed(1));
+                // No real reviews yet — show empty state
+                setReviews([]);
+                setAvgRating(0);
             }
         } catch (e) {
-            const savedReplies = JSON.parse(localStorage.getItem('reviewReplies') || '{}');
-            const withReplies = sampleReviews.map(r => ({ ...r, reply: savedReplies[r.id] || null }));
-            setReviews(withReplies);
-            setAvgRating('4.8');
+            setReviews([]);
+            setAvgRating(0);
         } finally {
             setLoading(false);
         }
@@ -139,7 +125,8 @@ const MyReviews = () => {
                     </div>
                 ) : (
                     <>
-                        {/* Rating summary */}
+                        {/* Rating summary — only shown when there are reviews */}
+                        {reviews.length > 0 && (
                         <div style={{ padding: '0 20px 24px' }}>
                             <div className="card" style={{ padding: '24px', display: 'flex', gap: '24px', alignItems: 'center' }}>
                                 <div style={{ textAlign: 'center' }}>
@@ -163,10 +150,20 @@ const MyReviews = () => {
                                 </div>
                             </div>
                         </div>
+                        )}
 
                         {/* Review list */}
                         <div style={{ padding: '0 20px' }}>
-                            {reviews.map((review, i) => (
+                            {reviews.length === 0 ? (
+                                <div style={{
+                                    textAlign: 'center', padding: '60px 20px',
+                                    color: 'var(--text-muted)'
+                                }}>
+                                    <Star size={40} color="var(--text-muted)" style={{ marginBottom: '16px', opacity: 0.4 }} />
+                                    <p style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '8px' }}>Sin reseñas aún</p>
+                                    <p style={{ fontSize: '13px' }}>Cuando completes trabajos, las reseñas de tus clientes aparecerán aquí.</p>
+                                </div>
+                            ) : reviews.map((review, i) => (
                                 <motion.div
                                     key={review.id}
                                     initial={{ opacity: 0, y: 10 }}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, ChevronRight, MapPin, Star, Globe, Heart } from 'lucide-react';
+import { Search, ChevronRight, Star, Globe, Heart, Shield, Users, Zap, ArrowRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { featuredTrades, tradeGroups, trades } from '../data/categories';
@@ -23,6 +23,7 @@ const Dashboard = () => {
     const [showAllRecent, setShowAllRecent] = useState(false);
     const [showLangMenu, setShowLangMenu] = useState(false);
     const [userLocation, setUserLocation] = useState('');
+    const [isLoggedIn, setIsLoggedIn] = useState(null);
     const navigate = useNavigate();
     const { t, lang, setLang } = useLanguage();
 
@@ -38,7 +39,12 @@ const Dashboard = () => {
     const loadRecent = () => {
         try {
             const stored = JSON.parse(localStorage.getItem('recentPros') || '[]');
-            setRecentPros(stored.slice(0, 10));
+            // Filter out stale entries with the old hardcoded default name
+            const cleaned = stored.filter(p => p.name && p.name !== 'Marcus Thorne');
+            if (cleaned.length !== stored.length) {
+                localStorage.setItem('recentPros', JSON.stringify(cleaned));
+            }
+            setRecentPros(cleaned.slice(0, 10));
         } catch { setRecentPros([]); }
     };
 
@@ -64,13 +70,38 @@ const Dashboard = () => {
     };
 
     useEffect(() => {
+        const checkAuth = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            setIsLoggedIn(!!user);
+        };
+        checkAuth();
         loadRecent();
         loadFavorites();
         loadUserLocation();
+
+        const handleSubscriptionRedirects = async () => {
+            const params = new URLSearchParams(window.location.search);
+            const subSuccess = params.get('subscription');
+            const subCancelled = params.get('cancelled');
+
+            if (subSuccess === 'success') {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    await supabase.from('professionals').update({ subscription_status: 'active' }).eq('user_id', user.id);
+                    alert('¡Pago completado! Tu suscripción Profesional ya está activa.');
+                    navigate('/dashboard', { replace: true });
+                }
+            } else if (subCancelled === 'true') {
+                alert('El proceso de suscripción fue cancelado.');
+                navigate('/dashboard', { replace: true });
+            }
+        };
+        handleSubscriptionRedirects();
+
         const onFocus = () => { loadRecent(); loadFavorites(); };
         window.addEventListener('focus', onFocus);
         return () => window.removeEventListener('focus', onFocus);
-    }, []);
+    }, [navigate]);
 
     const handleSearch = (e) => {
         if (e.key === 'Enter' && searchQuery.trim()) {
@@ -145,10 +176,19 @@ const Dashboard = () => {
                                     </>
                                 )}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <MapPin size={14} color="var(--accent)" />
-                                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{userLocation}</span>
+                            {userLocation && (
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: '6px',
+                                background: 'var(--accent-soft, rgba(37,99,235,0.1))',
+                                padding: '5px 12px', borderRadius: '20px',
+                                border: '1px solid rgba(37,99,235,0.15)',
+                            }}>
+                                <span style={{ fontSize: '13px' }}>📍</span>
+                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                                    {t('dash_searching_in')} <strong style={{ color: 'var(--text-primary)' }}>{userLocation}</strong>
+                                </span>
                             </div>
+                            )}
                         </div>
                     </div>
 
@@ -164,6 +204,92 @@ const Dashboard = () => {
                         />
                     </div>
                 </div>
+
+                {/* Hero for non-logged-in users */}
+                {isLoggedIn === false && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5 }}
+                        style={{ padding: '20px 20px 0' }}
+                    >
+                        <div style={{
+                            position: 'relative',
+                            borderRadius: '20px',
+                            overflow: 'hidden',
+                            background: 'linear-gradient(135deg, #0c1a30 0%, #162d50 50%, #1a3a6a 100%)',
+                            border: '1px solid rgba(37,99,235,0.2)',
+                            padding: '28px 24px 24px',
+                        }}>
+                            {/* Decorative glow */}
+                            <div style={{
+                                position: 'absolute', top: '-40px', right: '-40px',
+                                width: '160px', height: '160px',
+                                background: 'radial-gradient(circle, rgba(37,99,235,0.25) 0%, transparent 70%)',
+                                borderRadius: '50%', pointerEvents: 'none',
+                            }} />
+                            <div style={{
+                                position: 'absolute', bottom: '-30px', left: '-20px',
+                                width: '120px', height: '120px',
+                                background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)',
+                                borderRadius: '50%', pointerEvents: 'none',
+                            }} />
+
+                            <div style={{ position: 'relative', zIndex: 1 }}>
+                                <motion.h2
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.15 }}
+                                    style={{
+                                        fontSize: '22px', fontWeight: '800', color: '#ffffff',
+                                        lineHeight: 1.3, marginBottom: '10px',
+                                    }}
+                                >
+                                    {t('hero_title')}
+                                </motion.h2>
+                                <motion.p
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.25 }}
+                                    style={{
+                                        fontSize: '14px', color: 'rgba(255,255,255,0.7)',
+                                        lineHeight: 1.6, marginBottom: '20px', maxWidth: '320px',
+                                    }}
+                                >
+                                    {t('hero_desc')}
+                                </motion.p>
+
+                                {/* Value props */}
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    transition={{ delay: 0.35 }}
+                                    style={{ display: 'flex', gap: '16px', marginBottom: '22px', flexWrap: 'wrap' }}
+                                >
+                                    {[
+                                        { icon: Users, text: t('hero_feat_1'), color: '#60a5fa' },
+                                        { icon: Shield, text: t('hero_feat_2'), color: '#34d399' },
+                                        { icon: Zap, text: t('hero_feat_3'), color: '#fbbf24' },
+                                    ].map((feat, i) => (
+                                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <div style={{
+                                                width: '28px', height: '28px', borderRadius: '8px',
+                                                background: `${feat.color}18`,
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                flexShrink: 0,
+                                            }}>
+                                                <feat.icon size={14} color={feat.color} />
+                                            </div>
+                                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.8)', fontWeight: '500' }}>
+                                                {feat.text}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </motion.div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
 
                 {/* Browse by Trade */}
                 <div style={{ padding: '28px 20px 0' }}>
