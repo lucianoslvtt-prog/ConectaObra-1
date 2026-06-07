@@ -105,7 +105,7 @@ const EditProfileParticular = () => {
         <div className="page">
             <div className="page-content" style={{ padding: '0 0 40px' }}>
                 {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '16px 20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: 'calc(16px + env(safe-area-inset-top, 0px)) 20px 16px 20px' }}>
                     <button className="header-back" onClick={() => navigate(-1)}>
                         <ChevronLeft size={22} />
                     </button>

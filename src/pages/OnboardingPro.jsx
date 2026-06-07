@@ -164,7 +164,8 @@ const OnboardingPro = () => {
                     .maybeSingle();
 
                 if (pro) {
-                    setIsExistingPro(true); // Already subscribed — skip payment step
+                    // Only skip payment step if subscription is actually active
+                    setIsExistingPro(pro.subscription_status === 'active');
                     if (pro.phone) {
                         const parts = pro.phone.split(' ');
                         if (parts.length > 1) {
@@ -266,12 +267,13 @@ const OnboardingPro = () => {
         // Save to profiles table
         const locationStr = locations.filter(l => l.trim()).join(', ');
         const profileUpdate = {
-            role: 'professional',
+            // Do NOT set role: 'professional' here — that happens via Stripe webhook after payment
             username: fullName.trim(),
             full_name: fullName.trim(),
             specialty: specialtyStr,
             languages: selectedLanguages,
             location: locationStr || null,
+            pending_professional: true,
         };
         if (avatarUrl) profileUpdate.avatar_url = avatarUrl;
 
@@ -1316,7 +1318,7 @@ const OnboardingPro = () => {
     };
 
     return (
-        <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg-primary)', padding: '20px' }}>
+        <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg-primary)', padding: 'calc(20px + env(safe-area-inset-top, 0px)) 20px 20px 20px' }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                 <button className="header-back" onClick={() => step > 1 ? setStep(step - 1) : navigate(-1)}>

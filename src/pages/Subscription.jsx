@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { ChevronLeft, Crown, Check, Sparkles, Shield, Star, Zap, TrendingUp, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
+import { isNative } from '../lib/platform';
 
 const Subscription = () => {
     const navigate = useNavigate();
@@ -28,7 +29,11 @@ const Subscription = () => {
     const handleSubscribe = async () => {
         setLoading(true);
         try {
-            const response = await fetch('/api/create-checkout-session', {
+            // On native, we need the full URL since relative paths don't work
+            const apiBase = isNative()
+                ? (import.meta.env.VITE_API_URL || 'https://conectaobra.es')
+                : '';
+            const response = await fetch(`${apiBase}/api/create-checkout-session`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -40,7 +45,13 @@ const Subscription = () => {
             const data = await response.json();
 
             if (data.url) {
-                window.location.href = data.url;
+                if (isNative()) {
+                    // On native, open Stripe Checkout in system browser
+                    const { Browser } = await import('@capacitor/browser');
+                    await Browser.open({ url: data.url });
+                } else {
+                    window.location.href = data.url;
+                }
             } else {
                 throw new Error(data.error || 'Error al crear la sesión de pago');
             }

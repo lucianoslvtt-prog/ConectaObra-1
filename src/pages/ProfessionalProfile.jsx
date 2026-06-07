@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, MapPin, Star, Briefcase, Clock, Phone, Mail, MessageSquare, Heart, X, Send, Shield } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin, Star, Briefcase, Clock, Phone, Mail, MessageSquare, Heart, X, Send, Shield, Camera, Image } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
 import { trades } from '../data/categories';
@@ -38,6 +38,9 @@ const ProfessionalProfile = () => {
     const [ratingValue, setRatingValue] = useState(0);
     const [ratingComment, setRatingComment] = useState('');
     const [submittingRating, setSubmittingRating] = useState(false);
+    const [reviewImages, setReviewImages] = useState([]);
+    const [reviewImagePreviews, setReviewImagePreviews] = useState([]);
+    const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
     const [realReviews, setRealReviews] = useState([]);
     const [realAvgRating, setRealAvgRating] = useState(null);
     const [currentUserId, setCurrentUserId] = useState(null);
@@ -178,6 +181,28 @@ const ProfessionalProfile = () => {
         } catch { /* ignore */ }
     }, [id, pro.specialty, pro.name, pro.rating, pro.location]);
 
+    const handleReviewImageSelect = (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length + reviewImages.length > 4) {
+            alert('Puedes adjuntar un máximo de 4 imágenes por reseña.');
+            return;
+        }
+        const newImages = [...reviewImages, ...files];
+        setReviewImages(newImages);
+        const newPreviews = files.map(file => URL.createObjectURL(file));
+        setReviewImagePreviews([...reviewImagePreviews, ...newPreviews]);
+    };
+
+    const removeReviewImage = (index) => {
+        const newImages = [...reviewImages];
+        newImages.splice(index, 1);
+        setReviewImages(newImages);
+        const newPreviews = [...reviewImagePreviews];
+        URL.revokeObjectURL(newPreviews[index]);
+        newPreviews.splice(index, 1);
+        setReviewImagePreviews(newPreviews);
+    };
+
     const submitRating = async () => {
         if (ratingValue === 0 || !currentUserId) return;
         setSubmittingRating(true);
@@ -190,6 +215,26 @@ const ProfessionalProfile = () => {
 
             const reviewerName = myProfile?.full_name || myProfile?.username || 'Usuario';
 
+            const imageUrls = [];
+            if (reviewImages.length > 0) {
+                for (const file of reviewImages) {
+                    const ext = file.name.split('.').pop();
+                    const fileName = `reviews/${currentUserId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+                    const { error: uploadError } = await supabase.storage
+                        .from('community-images')
+                        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+                    
+                    if (!uploadError) {
+                        const { data: urlData } = supabase.storage
+                            .from('community-images')
+                            .getPublicUrl(fileName);
+                        if (urlData?.publicUrl) {
+                            imageUrls.push(urlData.publicUrl);
+                        }
+                    }
+                }
+            }
+
             const { data: newReview, error } = await supabase
                 .from('reviews')
                 .insert({
@@ -198,6 +243,7 @@ const ProfessionalProfile = () => {
                     rating: ratingValue,
                     comment: ratingComment.trim() || null,
                     reviewer_name: reviewerName,
+                    image_urls: imageUrls,
                 })
                 .select()
                 .single();
@@ -212,6 +258,8 @@ const ProfessionalProfile = () => {
             setShowRatingModal(false);
             setRatingValue(0);
             setRatingComment('');
+            setReviewImages([]);
+            setReviewImagePreviews([]);
         } catch (e) {
             console.error('Rating error:', e);
         } finally {
@@ -281,7 +329,8 @@ const ProfessionalProfile = () => {
     }
 
     return (
-        <div className="page">
+        <>
+            <div className="page">
             <div className="page-content" style={{ paddingBottom: '100px' }}>
                 {/* Header */}
                 <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -429,33 +478,39 @@ const ProfessionalProfile = () => {
                         </div>
                     )}
 
-                    {/* Stats */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '32px', marginTop: '24px' }}>
+                    </div>{/* end zIndex wrapper */}
+                </div>
+
+                {/* Stats Card - separate from cover */}
+                <div style={{ padding: '0 20px', marginTop: '16px' }}>
+                    <div className="card" style={{
+                        display: 'flex', justifyContent: 'space-around', alignItems: 'center',
+                        padding: '20px 12px',
+                    }}>
                         {isProRole && (
                             <>
                                 <div style={{ textAlign: 'center' }}>
                                     <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.experience}</p>
                                     <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('pro_years_exp')}</p>
                                 </div>
-                                <div style={{ width: '1px', background: 'var(--border)' }} />
+                                <div style={{ width: '1px', height: '36px', background: 'var(--border)' }} />
                                 <div style={{ textAlign: 'center' }}>
                                     <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.projects}</p>
                                     <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('prof_projects_label')}</p>
                                 </div>
-                                <div style={{ width: '1px', background: 'var(--border)' }} />
+                                <div style={{ width: '1px', height: '36px', background: 'var(--border)' }} />
                             </>
                         )}
                         <div style={{ textAlign: 'center' }}>
                             <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.rating ?? '—'}</p>
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('prof_rating')}</p>
                         </div>
-                        <div style={{ width: '1px', background: 'var(--border)' }} />
+                        <div style={{ width: '1px', height: '36px', background: 'var(--border)' }} />
                         <div style={{ textAlign: 'center' }}>
                             <p style={{ fontSize: '24px', fontWeight: '800', color: 'var(--accent)' }}>{pro.reviews}</p>
                             <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('prof_reviews_label')}</p>
                         </div>
                     </div>
-                    </div>{/* end zIndex wrapper */}
                 </div>
 
                 {/* Bio - only for professionals */}
@@ -704,7 +759,20 @@ const ProfessionalProfile = () => {
                                     </div>
                                 </div>
                                 {review.comment && (
-                                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{review.comment}</p>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: review.image_urls?.length > 0 ? '8px' : '0' }}>{review.comment}</p>
+                                )}
+                                {review.image_urls && review.image_urls.length > 0 && (
+                                    <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', marginTop: '8px' }}>
+                                        {review.image_urls.map((url, idx) => (
+                                            <img
+                                                key={idx}
+                                                src={url}
+                                                alt="Review attachment"
+                                                onClick={() => setLightbox({ isOpen: true, images: review.image_urls, currentIndex: idx })}
+                                                style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer', flexShrink: 0, border: '1px solid var(--border)' }}
+                                            />
+                                        ))}
+                                    </div>
                                 )}
                             </div>
                         ))
@@ -730,7 +798,7 @@ const ProfessionalProfile = () => {
                                 zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 padding: '20px',
                             }}
-                            onClick={() => setShowRatingModal(false)}
+                            onClick={() => { setShowRatingModal(false); setReviewImages([]); setReviewImagePreviews([]); }}
                         >
                             <motion.div
                                 initial={{ scale: 0.8, opacity: 0 }}
@@ -745,7 +813,7 @@ const ProfessionalProfile = () => {
                             >
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
                                     <h3 style={{ fontSize: '18px', fontWeight: '800' }}>Valorar a {pro.name.split(' ')[0]}</h3>
-                                    <button onClick={() => setShowRatingModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                                    <button onClick={() => { setShowRatingModal(false); setReviewImages([]); setReviewImagePreviews([]); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                                         <X size={20} />
                                     </button>
                                 </div>
@@ -782,9 +850,40 @@ const ProfessionalProfile = () => {
                                     placeholder="Añade un comentario (opcional)..."
                                     style={{
                                         minHeight: '80px', padding: '12px', fontSize: '14px',
-                                        marginBottom: '16px', resize: 'none',
+                                        marginBottom: '16px', resize: 'none', width: '100%',
+                                        borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)'
                                     }}
                                 />
+
+                                {/* Image Previews */}
+                                {reviewImagePreviews.length > 0 && (
+                                    <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', marginBottom: '16px', paddingBottom: '4px' }}>
+                                        {reviewImagePreviews.map((preview, idx) => (
+                                            <div key={idx} style={{ position: 'relative', flexShrink: 0, width: '60px', height: '60px' }}>
+                                                <img src={preview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+                                                <button
+                                                    onClick={() => removeReviewImage(idx)}
+                                                    style={{
+                                                        position: 'absolute', top: '-4px', right: '-4px', background: 'var(--text-primary)', color: 'var(--bg-primary)',
+                                                        border: 'none', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    <X size={10} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Toolbar */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
+                                            <input type="file" accept="image/*" multiple onChange={handleReviewImageSelect} style={{ display: 'none' }} />
+                                            <Camera size={18} />
+                                        </label>
+                                    </div>
+                                </div>
 
                                 <button
                                     onClick={submitRating}
@@ -818,6 +917,15 @@ const ProfessionalProfile = () => {
                     onClick={async () => {
                         setContacting(true);
                         try {
+                            const { data: { session } } = await supabase.auth.getSession();
+                            if (!session) {
+                                const { data: refreshData } = await supabase.auth.refreshSession();
+                                if (!refreshData?.session) {
+                                    navigate('/auth');
+                                    return;
+                                }
+                            }
+
                             const { data: { user } } = await supabase.auth.getUser();
                             if (!user) { navigate('/auth'); return; }
 
@@ -853,27 +961,39 @@ const ProfessionalProfile = () => {
                             }
 
                             // Create conversation with the professional
-                            const { data: conv, error } = await supabase
+                            // Generate ID client-side to avoid SELECT policy conflict
+                            // (SELECT policy checks conversation_participants which don't exist yet)
+                            const convId = crypto.randomUUID();
+                            const { error } = await supabase
                                 .from('conversations')
                                 .insert({
+                                    id: convId,
                                     poster_name: pro.name,
                                     original_post_content: `${pro.specialty ? pro.specialty.split(',').map(s => { const tr = trades.find(x => x.id === s.trim() || x.name === s.trim()); return tr ? (t(tr.tkey) || tr.name) : s.trim(); }).join(', ') : ''} — ${pro.location}`,
                                     last_message: t('chat_reply_label') || 'Contacto',
                                     last_message_at: new Date().toISOString()
-                                })
-                                .select()
-                                .single();
+                                });
 
-                            if (conv) {
-                                // Add both participants
-                                await supabase.from('conversation_participants').insert([
-                                    { conversation_id: conv.id, user_id: user.id },
-                                    { conversation_id: conv.id, user_id: id },
-                                ]);
-                                navigate(`/chat/${conv.id}`);
+                            if (error) {
+                                console.error('Error creating conversation:', error);
+                                alert('Error al crear la conversación: ' + (error.message || 'Error desconocido'));
+                                return;
                             }
+
+                            // Add both participants
+                            const { error: partError } = await supabase.from('conversation_participants').insert([
+                                { conversation_id: convId, user_id: user.id },
+                                { conversation_id: convId, user_id: id },
+                            ]);
+                            if (partError) {
+                                console.error('Error adding participants:', partError);
+                                alert('Error al añadir participantes: ' + (partError.message || 'Error desconocido'));
+                                return;
+                            }
+                            navigate(`/chat/${convId}`);
                         } catch (e) {
-                            console.error(e);
+                            console.error('Contact error:', e);
+                            alert('Error al contactar: ' + (e.message || 'Error desconocido'));
                         } finally {
                             setContacting(false);
                         }
@@ -883,6 +1003,67 @@ const ProfessionalProfile = () => {
                 </button>
             </div>
         </div>
+
+            {/* Lightbox for Images */}
+            <AnimatePresence>
+                {lightbox.isOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)',
+                            zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+                        }}
+                    >
+                        <button
+                            onClick={() => setLightbox({ ...lightbox, isOpen: false })}
+                            style={{
+                                position: 'absolute', top: '20px', right: '20px',
+                                background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
+                                width: '40px', height: '40px', borderRadius: '50%',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10
+                            }}
+                        >
+                            <X size={24} />
+                        </button>
+                        
+                        {lightbox.images.length > 1 && (
+                            <>
+                                <button
+                                    onClick={() => setLightbox(prev => ({ ...prev, currentIndex: prev.currentIndex > 0 ? prev.currentIndex - 1 : prev.images.length - 1 }))}
+                                    style={{
+                                        position: 'absolute', left: '20px', top: '50%', transform: 'translateY(-50%)',
+                                        background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
+                                        width: '40px', height: '40px', borderRadius: '50%',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10
+                                    }}
+                                >
+                                    <ChevronLeft size={24} />
+                                </button>
+                                <button
+                                    onClick={() => setLightbox(prev => ({ ...prev, currentIndex: prev.currentIndex < prev.images.length - 1 ? prev.currentIndex + 1 : 0 }))}
+                                    style={{
+                                        position: 'absolute', right: '20px', top: '50%', transform: 'translateY(-50%)',
+                                        background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
+                                        width: '40px', height: '40px', borderRadius: '50%',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10
+                                    }}
+                                >
+                                    <ChevronRight size={24} />
+                                </button>
+                            </>
+                        )}
+                        
+                        <img
+                            src={lightbox.images[lightbox.currentIndex]}
+                            alt="Reseña"
+                            style={{ maxWidth: '100vw', maxHeight: '100vh', objectFit: 'contain' }}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>
     );
 };
 

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Mail, User, Lock, ArrowRight, ChevronLeft, KeyRound, Phone, ChevronDown, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
+import { isNative } from '../lib/platform';
 
 const phonePrefixes = [
     { code: '+34', country: 'España', flag: '🇪🇸' },
@@ -59,7 +60,41 @@ const Auth = () => {
 
     // ─── Social login ───
 
+    const handleNativeOAuth = async (provider) => {
+        setLoading(true);
+        try {
+            const { Browser } = await import('@capacitor/browser');
+            const { data, error } = await supabase.auth.signInWithOAuth({
+                provider,
+                options: {
+                    redirectTo: 'conectaobra://auth/callback',
+                    skipBrowserRedirect: true,
+                    queryParams: provider === 'google' ? { prompt: 'select_account' } : {},
+                },
+            });
+            if (error) throw error;
+            if (data?.url) {
+                await Browser.open({ url: data.url, windowName: '_self' });
+                // Listen for the app URL callback
+                const listener = await Browser.addListener('browserFinished', () => {
+                    listener.remove();
+                    // Check if we got a session
+                    supabase.auth.getSession().then(({ data: { session } }) => {
+                        if (session) navigate('/dashboard');
+                        setLoading(false);
+                    });
+                });
+            }
+        } catch (error) {
+            setMessage({ type: 'error', text: error.message });
+            setLoading(false);
+        }
+    };
+
     const handleGoogleLogin = async () => {
+        if (isNative()) {
+            return handleNativeOAuth('google');
+        }
         setLoading(true);
         try {
             const { error } = await supabase.auth.signInWithOAuth({
@@ -79,6 +114,9 @@ const Auth = () => {
     };
 
     const handleAppleLogin = async () => {
+        if (isNative()) {
+            return handleNativeOAuth('apple');
+        }
         setLoading(true);
         try {
             const { error } = await supabase.auth.signInWithOAuth({

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Send, Image, X, Loader, Play, Square, Star, CheckCircle } from 'lucide-react';
+import { ChevronLeft, Send, Image, X, Loader, Play, Square, Star, CheckCircle, UserX, Camera } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useLanguage } from '../lib/LanguageContext';
 import { trades } from '../data/categories';
@@ -24,6 +24,8 @@ const ChatRoom = () => {
     const [ratingValue, setRatingValue] = useState(0);
     const [ratingComment, setRatingComment] = useState('');
     const [submittingRating, setSubmittingRating] = useState(false);
+    const [reviewImages, setReviewImages] = useState([]);
+    const [reviewImagePreviews, setReviewImagePreviews] = useState([]);
     // Price proposal state
     const [showPriceModal, setShowPriceModal] = useState(false);
     const [priceAmount, setPriceAmount] = useState('');
@@ -35,6 +37,9 @@ const ChatRoom = () => {
     const navigate = useNavigate();
     const { id } = useParams();
     const { t, lang } = useLanguage();
+
+    // Atajo para detectar si el otro usuario eliminó su cuenta
+    const isOtherDeleted = otherUser?.role === 'deleted';
 
     useEffect(() => {
         loadChat();
@@ -58,12 +63,14 @@ const ChatRoom = () => {
         if (!conv) return;
         setConversation(conv);
 
-        // Load job for this conversation
-        const { data: jobData } = await supabase
+        // Load job for this conversation (use order + limit to handle duplicates)
+        const { data: jobArr } = await supabase
             .from('jobs')
             .select('*')
             .eq('conversation_id', id)
-            .maybeSingle();
+            .order('created_at', { ascending: false })
+            .limit(1);
+        const jobData = jobArr?.[0] || null;
 
         setJob(jobData);
         setJobStatus(jobData?.status || null);
@@ -79,7 +86,28 @@ const ChatRoom = () => {
 
         const otherId = pIds.find(pid => pid !== user.id) || user.id;
         const isSelfChat = !pIds.find(pid => pid !== user.id);
-        if (isSelfChat && conv.poster_name) {
+
+        // Cargar mensajes ANTES de decidir quién es el otro usuario,
+        // así podemos detectar si fue eliminado mirando sender_id NULL
+        const { data: msgs } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', id)
+            .order('created_at', { ascending: true });
+        setMessages(msgs || []);
+
+        // Detectar si el otro usuario eliminó su cuenta:
+        // tras nuestro cambio del FK a SET NULL, sus mensajes quedan con sender_id = NULL
+        const otherUserWasDeleted = (msgs || []).some(m => m.sender_id === null);
+
+        if (otherUserWasDeleted) {
+            setOtherUser({
+                id: null,
+                username: 'Usuario eliminado',
+                role: 'deleted',
+                deleted: true,
+            });
+        } else if (isSelfChat && conv.poster_name) {
             setOtherUser({ id: otherId, username: conv.poster_name, role: 'user' });
         } else {
             const { data: profile } = await supabase
@@ -90,13 +118,6 @@ const ChatRoom = () => {
             setOtherUser(profile || { username: 'Usuario', role: 'user' });
         }
 
-        const { data: msgs } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', id)
-            .order('created_at', { ascending: true });
-        setMessages(msgs || []);
-
         await supabase
             .from('messages')
             .update({ read: true })
@@ -104,16 +125,20 @@ const ChatRoom = () => {
             .neq('sender_id', user.id)
             .eq('read', false);
 
-        // Show rating modal if job is completed and user hasn't rated
-        if (jobData?.status === 'completed') {
-            const ratedBy = jobData.rated_by || [];
-            if (!ratedBy.includes(user.id)) {
-                setShowRatingModal(true);
+        // Si el otro usuario fue eliminado, no procesamos ni rating ni timeouts
+        // (no tiene sentido valorar a alguien que ya no existe ni intentar avanzar el job)
+        if (!otherUserWasDeleted) {
+            // Show rating modal if job is completed and user hasn't rated
+            if (jobData?.status === 'completed') {
+                const ratedBy = jobData.rated_by || [];
+                if (!ratedBy.includes(user.id)) {
+                    setShowRatingModal(true);
+                }
             }
-        }
 
-        // Check auto-timeouts
-        await checkTimeouts(jobData, user, pIds);
+            // Check auto-timeouts
+            await checkTimeouts(jobData, user, pIds);
+        }
 
         const channel = supabase
             .channel(`chat-${id}`)
@@ -123,7 +148,10 @@ const ChatRoom = () => {
                 table: 'messages',
                 filter: `conversation_id=eq.${id}`
             }, (payload) => {
-                setMessages(prev => [...prev, payload.new]);
+                setMessages(prev => {
+                    if (prev.some(m => m.id === payload.new.id)) return prev;
+                    return [...prev, payload.new];
+                });
             })
             .on('postgres_changes', {
                 event: 'UPDATE',
@@ -148,7 +176,7 @@ const ChatRoom = () => {
                 setJob(prev => {
                     if (prev?.status === 'pending_finish' && newJob.status === 'completed') {
                         const ratedBy = newJob.rated_by || [];
-                        if (!ratedBy.includes(user.id)) {
+                        if (!ratedBy.includes(user.id) && !otherUserWasDeleted) {
                             setShowRatingModal(true);
                         }
                     }
@@ -257,6 +285,10 @@ const ChatRoom = () => {
     // ── Job workflow actions ────────────────────────────
     const handleStartJob = async () => {
         if (!currentUser || !otherUser) return;
+
+        // Prevent duplicates: check if a job already exists for this conversation
+        if (job) return;
+
         const myName = await getMyName();
 
         const { data: newJob } = await supabase.from('jobs').insert({
@@ -265,7 +297,7 @@ const ChatRoom = () => {
             started_by: currentUser.id,
             rated_by: [],
         }).select().single();
-        
+
         setJob(newJob);
         setJobStatus('pending_start');
 
@@ -281,7 +313,7 @@ const ChatRoom = () => {
             status: 'in_progress',
             started_at: now.toISOString(),
         }).eq('conversation_id', id).select().single();
-        
+
         setJob(updatedJob);
         setJobStatus('in_progress');
 
@@ -291,7 +323,7 @@ const ChatRoom = () => {
 
     const handleRejectStart = async () => {
         await supabase.from('jobs').delete().eq('conversation_id', id);
-        
+
         setJob(null);
         setJobStatus(null);
 
@@ -309,7 +341,7 @@ const ChatRoom = () => {
             finished_by: currentUser.id,
             finish_deadline: deadline,
         }).eq('conversation_id', id).select().single();
-        
+
         setJob(updatedJob);
         setJobStatus('pending_finish');
 
@@ -351,6 +383,22 @@ const ChatRoom = () => {
         await insertSystemMessage(`❌ ${myName} ha rechazado la finalización. El trabajo continúa.`, 'system_finish');
     };
 
+    const handleReviewImageSelect = (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length + reviewImages.length > 4) {
+            alert('Máximo 4 imágenes por reseña.');
+            return;
+        }
+        setReviewImages(prev => [...prev, ...files]);
+        setReviewImagePreviews(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
+    };
+
+    const removeReviewImage = (index) => {
+        URL.revokeObjectURL(reviewImagePreviews[index]);
+        setReviewImages(prev => prev.filter((_, i) => i !== index));
+        setReviewImagePreviews(prev => prev.filter((_, i) => i !== index));
+    };
+
     const submitRating = async () => {
         if (ratingValue === 0 || !currentUser) return;
         setSubmittingRating(true);
@@ -359,12 +407,29 @@ const ChatRoom = () => {
             const otherId = otherUser?.id;
             if (!otherId) return;
 
+            // Upload images
+            const imageUrls = [];
+            for (const file of reviewImages) {
+                const ext = file.name.split('.').pop();
+                const fileName = `reviews/${currentUser.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('community-images')
+                    .upload(fileName, file, { cacheControl: '3600', upsert: false });
+                if (!uploadError) {
+                    const { data: urlData } = supabase.storage
+                        .from('community-images')
+                        .getPublicUrl(fileName);
+                    if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl);
+                }
+            }
+
             await supabase.from('reviews').insert({
                 professional_id: otherId,
                 reviewer_id: currentUser.id,
                 reviewer_name: myName,
                 rating: ratingValue,
                 comment: ratingComment.trim() || null,
+                image_urls: imageUrls,
             });
 
             // Update rated_by array on the job
@@ -382,6 +447,8 @@ const ChatRoom = () => {
             setShowRatingModal(false);
             setRatingValue(0);
             setRatingComment('');
+            setReviewImages([]);
+            setReviewImagePreviews([]);
 
             await insertSystemMessage(`⭐ ${myName} ha dejado una valoración.`, 'system_rating');
         } catch (e) {
@@ -476,6 +543,8 @@ const ChatRoom = () => {
     };
 
     const canRespondToPrice = (msg) => {
+        // Si el otro usuario fue eliminado, no se puede responder a nada
+        if (isOtherDeleted) return false;
         return msg.message_type === 'system_price'
             && msg.content.includes('¿Aceptas?')
             && msg.sender_id !== currentUser?.id
@@ -517,6 +586,8 @@ const ChatRoom = () => {
 
     const sendMessage = async () => {
         if ((!newMessage.trim() && !mediaFile) || sending) return;
+        // Bloqueo extra: si el otro usuario fue eliminado, no permitir envío
+        if (isOtherDeleted) return;
         setSending(true);
         setUploading(!!mediaFile);
         try {
@@ -527,7 +598,7 @@ const ChatRoom = () => {
                 if (result) { mediaUrl = result.url; mediaType = result.type; }
             }
             const content = newMessage.trim() || (mediaType === 'image' ? '📷 Imagen' : '🎬 Vídeo');
-            
+
             // Insert and select the new message to update the UI instantly
             const { data: newMsg, error } = await supabase.from('messages').insert({
                 conversation_id: id,
@@ -536,9 +607,9 @@ const ChatRoom = () => {
                 media_url: mediaUrl,
                 media_type: mediaType
             }).select().single();
-            
+
             if (error) throw error;
-            
+
             // Optimistically update the UI to show the message instantly
             if (newMsg) {
                 setMessages(prev => {
@@ -551,7 +622,7 @@ const ChatRoom = () => {
                 last_message: content.slice(0, 100),
                 last_message_at: new Date().toISOString()
             }).eq('id', id);
-            
+
             setNewMessage('');
             clearMedia();
         } catch (e) { console.error(e); }
@@ -573,6 +644,7 @@ const ChatRoom = () => {
 
     // ── Determine which action buttons to show on system messages ──
     const canRespondToStart = (msg) => {
+        if (isOtherDeleted) return false;
         return msg.message_type === 'system_start'
             && msg.content.includes('¿Aceptas?')
             && jobStatus === 'pending_start'
@@ -580,6 +652,7 @@ const ChatRoom = () => {
     };
 
     const canRespondToFinish = (msg) => {
+        if (isOtherDeleted) return false;
         return msg.message_type === 'system_finish'
             && msg.content.includes('¿Confirmas?')
             && jobStatus === 'pending_finish'
@@ -668,26 +741,36 @@ const ChatRoom = () => {
                 </button>
                 <div style={{
                     width: '38px', height: '38px', borderRadius: '50%',
-                    background: otherUser?.role === 'professional'
-                        ? 'linear-gradient(135deg, #22c55e40, #22c55e15)'
-                        : 'linear-gradient(135deg, #2563eb40, #2563eb15)',
+                    background: isOtherDeleted
+                        ? 'linear-gradient(135deg, #99999940, #99999915)'
+                        : otherUser?.role === 'professional'
+                            ? 'linear-gradient(135deg, #22c55e40, #22c55e15)'
+                            : 'linear-gradient(135deg, #2563eb40, #2563eb15)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '16px', fontWeight: '700',
-                    color: otherUser?.role === 'professional' ? '#22c55e' : 'var(--accent)',
+                    color: isOtherDeleted ? '#999' : otherUser?.role === 'professional' ? '#22c55e' : 'var(--accent)',
                     flexShrink: 0,
                 }}>
-                    {otherUser?.username?.[0]?.toUpperCase() || '?'}
+                    {isOtherDeleted ? <UserX size={18} /> : (otherUser?.username?.[0]?.toUpperCase() || '?')}
                 </div>
                 <div
-                    style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
-                    onClick={() => otherUser?.id && navigate(`/professional/${otherUser.id}`)}
+                    style={{ flex: 1, minWidth: 0, cursor: isOtherDeleted ? 'default' : 'pointer' }}
+                    onClick={() => !isOtherDeleted && otherUser?.id && navigate(`/professional/${otherUser.id}`)}
                 >
-                    <p style={{ fontSize: '15px', fontWeight: '700' }}>{otherUser?.username || 'Usuario'}</p>
+                    <p style={{
+                        fontSize: '15px',
+                        fontWeight: '700',
+                        fontStyle: isOtherDeleted ? 'italic' : 'normal',
+                        color: isOtherDeleted ? 'var(--text-muted)' : 'inherit',
+                    }}>{otherUser?.username || 'Usuario'}</p>
                     <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {otherUser?.role === 'professional' ? t('chat_professional') : t('chat_particular')}
+                        {isOtherDeleted
+                            ? 'Esta cuenta ya no existe'
+                            : (otherUser?.role === 'professional' ? t('chat_professional') : t('chat_particular'))
+                        }
                     </p>
                 </div>
-                {getJobBadge()}
+                {!isOtherDeleted && getJobBadge()}
             </div>
 
             {/* Original post reference */}
@@ -704,8 +787,8 @@ const ChatRoom = () => {
                 </div>
             )}
 
-            {/* Price bar */}
-            {job && (job.price_amount != null || ['pending_start', 'in_progress'].includes(jobStatus)) && (
+            {/* Price bar (no se muestra si el otro usuario fue eliminado) */}
+            {!isOtherDeleted && job && (job.price_amount != null || ['pending_start', 'in_progress'].includes(jobStatus)) && (
                 <div style={{
                     margin: '0 20px 4px', padding: '10px 14px',
                     background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)',
@@ -775,7 +858,7 @@ const ChatRoom = () => {
                             {isSystem ? (
                                 (() => {
                                     let displayContent = msg.content;
-                                    
+
                                     if (msg.message_type === 'system_start' && msg.content.includes('¿Aceptas?')) {
                                         if (job?.started_by === currentUser?.id) {
                                             displayContent = msg.content.replace(' quiere comenzar el trabajo. ¿Aceptas?', ' ha solicitado comenzar el trabajo.');
@@ -805,53 +888,53 @@ const ChatRoom = () => {
                                         >
                                             <p>{displayContent}</p>
                                             {/* Action buttons for pending_start */}
-                                    {canRespondToStart(msg) && (
-                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
-                                            <button onClick={handleAcceptStart} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✓ Aceptar</button>
-                                            <button onClick={handleRejectStart} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✕ Rechazar</button>
-                                        </div>
-                                    )}
-                                    {/* Action buttons for pending_finish */}
-                                    {canRespondToFinish(msg) && (
-                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
-                                            <button onClick={handleAcceptFinish} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✓ Confirmar</button>
-                                            <button onClick={handleRejectFinish} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✕ Rechazar</button>
-                                        </div>
-                                    )}
-                                    {/* Action buttons for price proposal */}
-                                    {canRespondToPrice(msg) && (
-                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
-                                            <button onClick={() => handleAcceptPrice(msg)} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✓ Aceptar</button>
-                                            <button onClick={() => handleRejectPrice(msg)} style={{
-                                                padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
-                                                background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
-                                            }}>✕ Rechazar</button>
-                                        </div>
-                                    )}
-                                    <p style={{ fontSize: '10px', marginTop: '6px', color: 'var(--text-muted)' }}>
-                                        {formatTime(msg.created_at)}
-                                    </p>
-                                </motion.div>
-                            );
-                        })()
-                    ) : (
-                        /* Normal message */
-                        <motion.div
+                                            {canRespondToStart(msg) && (
+                                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
+                                                    <button onClick={handleAcceptStart} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✓ Aceptar</button>
+                                                    <button onClick={handleRejectStart} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✕ Rechazar</button>
+                                                </div>
+                                            )}
+                                            {/* Action buttons for pending_finish */}
+                                            {canRespondToFinish(msg) && (
+                                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
+                                                    <button onClick={handleAcceptFinish} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✓ Confirmar</button>
+                                                    <button onClick={handleRejectFinish} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✕ Rechazar</button>
+                                                </div>
+                                            )}
+                                            {/* Action buttons for price proposal */}
+                                            {canRespondToPrice(msg) && (
+                                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '10px' }}>
+                                                    <button onClick={() => handleAcceptPrice(msg)} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#22c55e', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✓ Aceptar</button>
+                                                    <button onClick={() => handleRejectPrice(msg)} style={{
+                                                        padding: '6px 20px', borderRadius: '20px', fontSize: '12px', fontWeight: '700',
+                                                        background: '#ef4444', color: 'white', border: 'none', cursor: 'pointer',
+                                                    }}>✕ Rechazar</button>
+                                                </div>
+                                            )}
+                                            <p style={{ fontSize: '10px', marginTop: '6px', color: 'var(--text-muted)' }}>
+                                                {formatTime(msg.created_at)}
+                                            </p>
+                                        </motion.div>
+                                    );
+                                })()
+                            ) : (
+                                /* Normal message */
+                                <motion.div
                                     initial={{ opacity: 0, y: 6 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     style={{
@@ -905,7 +988,7 @@ const ChatRoom = () => {
             </div>
 
             {/* Media preview */}
-            {mediaPreview && (
+            {!isOtherDeleted && mediaPreview && (
                 <div style={{
                     padding: '10px 20px', background: 'var(--bg-secondary)',
                     borderTop: '1px solid var(--border)',
@@ -938,55 +1021,75 @@ const ChatRoom = () => {
                 </div>
             )}
 
-            {/* Input */}
-            <div style={{
-                padding: '12px 20px',
-                paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
-                background: 'var(--bg-secondary)',
-                borderTop: mediaPreview ? 'none' : '1px solid var(--border)',
-                display: 'flex', gap: '8px', alignItems: 'flex-end'
-            }}>
-                <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={handleFileSelect} style={{ display: 'none' }} />
-                <button onClick={() => fileInputRef.current?.click()} style={{
-                    width: '42px', height: '42px', borderRadius: '50%',
-                    background: 'var(--bg-card)', border: '1px solid var(--border)',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, transition: 'all 0.2s'
+            {/* Input — bloqueado si el otro usuario fue eliminado */}
+            {isOtherDeleted ? (
+                <div style={{
+                    padding: '16px 20px',
+                    paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+                    background: 'var(--bg-secondary)',
+                    borderTop: '1px solid var(--border)',
+                    textAlign: 'center',
+                    fontSize: '13px',
+                    color: 'var(--text-muted)',
+                    fontStyle: 'italic',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
                 }}>
-                    <Image size={18} color="var(--accent)" />
-                </button>
-                <textarea
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-                    }}
-                    placeholder={t('chat_write')}
-                    rows={1}
-                    style={{ flex: 1, minHeight: '42px', maxHeight: '120px', resize: 'none', padding: '10px 14px', borderRadius: '20px' }}
-                />
-                <button
-                    onClick={sendMessage}
-                    disabled={(!newMessage.trim() && !mediaFile) || sending}
-                    style={{
+                    <UserX size={16} />
+                    Esta conversación está cerrada porque el usuario ya no existe.
+                </div>
+            ) : (
+                <div style={{
+                    padding: '12px 20px',
+                    paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+                    background: 'var(--bg-secondary)',
+                    borderTop: mediaPreview ? 'none' : '1px solid var(--border)',
+                    display: 'flex', gap: '8px', alignItems: 'flex-end'
+                }}>
+                    <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+                    <button onClick={() => fileInputRef.current?.click()} style={{
                         width: '42px', height: '42px', borderRadius: '50%',
-                        background: (newMessage.trim() || mediaFile) ? 'var(--accent)' : 'var(--bg-card)',
-                        border: 'none', cursor: (newMessage.trim() || mediaFile) ? 'pointer' : 'default',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'all 0.2s', flexShrink: 0
-                    }}
-                >
-                    {uploading ? (
-                        <Loader size={18} color="white" style={{ animation: 'spin 1s linear infinite' }} />
-                    ) : (
-                        <Send size={18} color={(newMessage.trim() || mediaFile) ? 'white' : 'var(--text-muted)'} />
-                    )}
-                </button>
-            </div>
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, transition: 'all 0.2s'
+                    }}>
+                        <Image size={18} color="var(--accent)" />
+                    </button>
+                    <textarea
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                        }}
+                        placeholder={t('chat_write')}
+                        rows={1}
+                        style={{ flex: 1, minHeight: '42px', maxHeight: '120px', resize: 'none', padding: '10px 14px', borderRadius: '20px' }}
+                    />
+                    <button
+                        onClick={sendMessage}
+                        disabled={(!newMessage.trim() && !mediaFile) || sending}
+                        style={{
+                            width: '42px', height: '42px', borderRadius: '50%',
+                            background: (newMessage.trim() || mediaFile) ? 'var(--accent)' : 'var(--bg-card)',
+                            border: 'none', cursor: (newMessage.trim() || mediaFile) ? 'pointer' : 'default',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.2s', flexShrink: 0
+                        }}
+                    >
+                        {uploading ? (
+                            <Loader size={18} color="white" style={{ animation: 'spin 1s linear infinite' }} />
+                        ) : (
+                            <Send size={18} color={(newMessage.trim() || mediaFile) ? 'white' : 'var(--text-muted)'} />
+                        )}
+                    </button>
+                </div>
+            )}
 
             {/* Rating Modal */}
             <AnimatePresence>
-                {showRatingModal && (
+                {showRatingModal && !isOtherDeleted && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -1046,8 +1149,44 @@ const ChatRoom = () => {
                                 style={{
                                     minHeight: '70px', padding: '12px', fontSize: '14px',
                                     marginBottom: '14px', resize: 'none', width: '100%',
+                                    borderRadius: '8px', border: '1px solid var(--border)',
+                                    background: 'var(--bg-primary)', color: 'var(--text-primary)'
                                 }}
                             />
+
+                            {/* Image Previews */}
+                            {reviewImagePreviews.length > 0 && (
+                                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', marginBottom: '14px', paddingBottom: '4px' }}>
+                                    {reviewImagePreviews.map((preview, idx) => (
+                                        <div key={idx} style={{ position: 'relative', flexShrink: 0, width: '56px', height: '56px' }}>
+                                            <img src={preview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+                                            <button
+                                                onClick={() => removeReviewImage(idx)}
+                                                style={{
+                                                    position: 'absolute', top: '-4px', right: '-4px', background: 'var(--text-primary)', color: 'var(--bg-primary)',
+                                                    border: 'none', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+                                                }}
+                                            >
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Add Photo Button */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                                <label style={{
+                                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
+                                    padding: '8px 14px', borderRadius: '20px',
+                                    background: 'var(--bg-primary)', color: 'var(--text-secondary)',
+                                    fontSize: '12px', fontWeight: '600', border: '1px solid var(--border)'
+                                }}>
+                                    <input type="file" accept="image/*" multiple onChange={handleReviewImageSelect} style={{ display: 'none' }} />
+                                    <Camera size={14} /> Añadir fotos
+                                </label>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{reviewImages.length}/4</span>
+                            </div>
 
                             <button
                                 onClick={submitRating}
@@ -1075,7 +1214,7 @@ const ChatRoom = () => {
 
             {/* Price Proposal Modal */}
             <AnimatePresence>
-                {showPriceModal && (
+                {showPriceModal && !isOtherDeleted && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}

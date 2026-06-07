@@ -85,12 +85,10 @@ const Dashboard = () => {
             const subCancelled = params.get('cancelled');
 
             if (subSuccess === 'success') {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    await supabase.from('professionals').update({ subscription_status: 'active' }).eq('user_id', user.id);
-                    alert('¡Pago completado! Tu suscripción Profesional ya está activa.');
-                    navigate('/dashboard', { replace: true });
-                }
+                // Subscription activation is handled by the Stripe webhook server-side.
+                // Just show a confirmation message to the user.
+                alert('¡Pago completado! Tu suscripción Profesional se activará en unos segundos.');
+                navigate('/dashboard', { replace: true });
             } else if (subCancelled === 'true') {
                 alert('El proceso de suscripción fue cancelado.');
                 navigate('/dashboard', { replace: true });

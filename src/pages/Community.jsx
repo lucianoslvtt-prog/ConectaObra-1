@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image, Send, MoreHorizontal, Bell, Reply, X, Plus, Camera, Video, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { Image, Send, MoreHorizontal, Bell, BellOff, Briefcase, Users, Reply, X, Plus, Camera, Video, ChevronLeft, ChevronRight, Filter, MapPin } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BottomNav from '../components/BottomNav';
 import { trades } from '../data/categories';
@@ -74,6 +74,17 @@ const Community = () => {
     const [videoPreview, setVideoPreview] = useState(null);
     const [toastMsg, setToastMsg] = useState('');
     const [lightbox, setLightbox] = useState(null); // { urls: [], index: number }
+
+    // Job Board specific states
+    const [activeTab, setActiveTab] = useState('general'); // 'general' or 'jobs'
+    const [jobOffers, setJobOffers] = useState([]);
+    const [jobsLoading, setJobsLoading] = useState(false);
+    const [newJobType, setNewJobType] = useState('seek_worker'); // 'seek_worker' | 'seek_job'
+    const [newJobContent, setNewJobContent] = useState('');
+    const [newJobTrade, setNewJobTrade] = useState('');
+    const [newJobLocation, setNewJobLocation] = useState('');
+    const [isSubscribedToJobs, setIsSubscribedToJobs] = useState(false);
+    const [publishingJob, setPublishingJob] = useState(false);
     const filterScrollRef = useRef(null);
     const textareaRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -83,6 +94,8 @@ const Community = () => {
 
     useEffect(() => {
         loadPosts();
+        loadJobs();
+        checkJobSubscription();
     }, []);
 
     const loadPosts = async () => {
@@ -136,6 +149,165 @@ const Community = () => {
             setPostsLoading(false);
         }
     };
+
+    const loadJobs = async () => {
+        setJobsLoading(true);
+        try {
+            const { data, error } = await supabase
+                .from('job_offers')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(50);
+                
+            if (error) {
+                console.error('Error loading job offers:', error);
+                return;
+            }
+            if (data && data.length > 0) {
+                const userIds = [...new Set(data.map(p => p.user_id))];
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, username')
+                    .in('id', userIds);
+                const usernameMap = {};
+                if (profiles) {
+                    profiles.forEach(p => { usernameMap[p.id] = p.username; });
+                }
+                const formatted = data.map(p => ({
+                    id: p.id,
+                    user_id: p.user_id,
+                    user: usernameMap[p.user_id] || 'Usuario',
+                    avatar: (usernameMap[p.user_id] || 'U')[0].toUpperCase(),
+                    time: formatTime(p.created_at),
+                    content: p.content,
+                    offer_type: p.offer_type,
+                    trade: p.trade,
+                    location: p.location,
+                }));
+                setJobOffers(formatted);
+            } else {
+                setJobOffers([]);
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setJobsLoading(false);
+        }
+    };
+
+    const checkJobSubscription = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) return;
+        const { data } = await supabase
+            .from('job_subscribers')
+            .select('user_id')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+        setIsSubscribedToJobs(!!data);
+    };
+
+    const toggleJobSubscription = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+            showToast('Debes iniciar sesión para activar notificaciones.');
+            return;
+        }
+        
+        try {
+            if (isSubscribedToJobs) {
+                await supabase.from('job_subscribers').delete().eq('user_id', session.user.id);
+                setIsSubscribedToJobs(false);
+                showToast('Notificaciones de empleo desactivadas');
+            } else {
+                await supabase.from('job_subscribers').insert({ user_id: session.user.id });
+                setIsSubscribedToJobs(true);
+                showToast('Notificaciones de empleo activadas');
+            }
+        } catch (error) {
+            console.error('Error toggling subscription:', error);
+            showToast('Error al cambiar suscripción.');
+        }
+    };
+
+    const handlePostJob = async () => {
+        if (!newJobContent.trim()) return;
+        setPublishingJob(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
+            if (!user) {
+                showToast('Debes iniciar sesión para publicar.');
+                setPublishingJob(false);
+                return;
+            }
+
+            // Get username
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('username')
+                .eq('id', user.id)
+                .single();
+            const username = profile?.username || 'Usuario';
+
+            const { data: jobData, error: jobError } = await supabase
+                .from('job_offers')
+                .insert({
+                    user_id: user.id,
+                    content: newJobContent,
+                    offer_type: newJobType,
+                    trade: newJobTrade,
+                    location: newJobLocation
+                })
+                .select()
+                .single();
+
+            if (jobError) {
+                console.error(jobError);
+                showToast('Error al publicar oferta. ¿Se creó la tabla?');
+                return;
+            }
+
+            // Notify subscribers
+            const { data: subs } = await supabase.from('job_subscribers').select('user_id');
+            if (subs && subs.length > 0) {
+                const notifications = subs
+                    .filter(s => s.user_id !== user.id)
+                    .map(s => ({
+                        recipient_id: s.user_id,
+                        sender_id: user.id,
+                        type: 'job_offer',
+                        title: newJobType === 'seek_worker' ? '📢 Nueva oferta: Buscan trabajador' : '📢 Nueva oferta: Alguien busca trabajo',
+                        body: newJobContent.length > 100 ? newJobContent.substring(0, 100) + '...' : newJobContent,
+                    }));
+                if (notifications.length > 0) {
+                    await supabase.from('notifications').insert(notifications);
+                }
+            }
+
+            const localJob = {
+                id: jobData?.id || Date.now().toString(),
+                user_id: user.id,
+                user: username,
+                avatar: username[0].toUpperCase(),
+                time: 'ahora',
+                content: newJobContent,
+                offer_type: newJobType,
+                trade: newJobTrade,
+                location: newJobLocation
+            };
+            setJobOffers([localJob, ...jobOffers]);
+            setNewJobContent('');
+            setNewJobTrade('');
+            setNewJobLocation('');
+            showToast('Oferta publicada correctamente');
+        } catch (err) {
+            console.error(err);
+            showToast('Error inesperado.');
+        } finally {
+            setPublishingJob(false);
+        }
+    };
+
 
     const formatTime = (dateStr) => {
         if (!dateStr) return '';
@@ -502,11 +674,82 @@ const Community = () => {
 
                 {/* Header */}
                 <div style={{ padding: '20px 20px 0' }}>
-                    <div style={{ marginBottom: '16px' }}>
+                    <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <h1 style={{ fontSize: '22px', fontWeight: '800' }}>{t('comm_title')}</h1>
+                        {activeTab === 'jobs' && (
+                            <button
+                                onClick={toggleJobSubscription}
+                                style={{
+                                    background: isSubscribedToJobs ? 'var(--accent)' : 'var(--bg-secondary)',
+                                    color: isSubscribedToJobs ? 'white' : 'var(--text-muted)',
+                                    border: 'none',
+                                    padding: '8px 12px',
+                                    borderRadius: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    boxShadow: isSubscribedToJobs ? '0 4px 12px rgba(37,99,235,0.3)' : 'none'
+                                }}
+                            >
+                                {isSubscribedToJobs ? <Bell size={16} /> : <BellOff size={16} />}
+                                {isSubscribedToJobs ? 'Suscrito' : 'Avisos'}
+                            </button>
+                        )}
                     </div>
 
-                    {/* ── Trade Filter Bar ── */}
+                    {/* Tab Navigation */}
+                    <div style={{ 
+                        display: 'flex', 
+                        background: 'var(--bg-secondary)', 
+                        borderRadius: '12px',
+                        padding: '4px',
+                        marginBottom: '16px' 
+                    }}>
+                        <button
+                            onClick={() => setActiveTab('general')}
+                            style={{
+                                flex: 1,
+                                padding: '8px 0',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: activeTab === 'general' ? 'var(--bg-card)' : 'transparent',
+                                color: activeTab === 'general' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                fontSize: '14px',
+                                fontWeight: activeTab === 'general' ? '700' : '600',
+                                cursor: 'pointer',
+                                boxShadow: activeTab === 'general' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Muro General
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('jobs')}
+                            style={{
+                                flex: 1,
+                                padding: '8px 0',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: activeTab === 'jobs' ? 'var(--bg-card)' : 'transparent',
+                                color: activeTab === 'jobs' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                fontSize: '14px',
+                                fontWeight: activeTab === 'jobs' ? '700' : '600',
+                                cursor: 'pointer',
+                                boxShadow: activeTab === 'jobs' ? '0 2px 8px rgba(0,0,0,0.05)' : 'none',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            Ofertas y Empleo
+                        </button>
+                    </div>
+
+                    {activeTab === 'general' ? (
+                        <>
+                            {/* ── Trade Filter Bar ── */}
                     <div
                         ref={filterScrollRef}
                         style={{
@@ -876,7 +1119,6 @@ const Community = () => {
                                                 setShowMentionDropdown(true);
                                                 setMentionFilter('');
                                                 setMentionCursorPos(newPost.length);
-                                                textareaRef.current?.focus();
                                             }}
                                             style={{
                                                 background: 'var(--accent-soft)', border: 'none',
@@ -901,12 +1143,89 @@ const Community = () => {
                             </div>
                         </div>
                     </div>
+                        </>
+                    ) : (
+                        <div className="card" style={{ padding: '16px', position: 'relative' }}>
+                            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                                <button
+                                    onClick={() => setNewJobType('seek_worker')}
+                                    style={{
+                                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
+                                        background: newJobType === 'seek_worker' ? 'var(--accent)' : 'var(--bg-secondary)',
+                                        color: newJobType === 'seek_worker' ? 'white' : 'var(--text-secondary)',
+                                        fontWeight: '600', fontSize: '14px', cursor: 'pointer', transition: 'all 0.2s',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                                    }}
+                                >
+                                    <Briefcase size={16} /> Busco Trabajador
+                                </button>
+                                <button
+                                    onClick={() => setNewJobType('seek_job')}
+                                    style={{
+                                        flex: 1, padding: '10px', borderRadius: '8px', border: 'none',
+                                        background: newJobType === 'seek_job' ? '#10b981' : 'var(--bg-secondary)',
+                                        color: newJobType === 'seek_job' ? 'white' : 'var(--text-secondary)',
+                                        fontWeight: '600', fontSize: '14px', cursor: 'pointer', transition: 'all 0.2s',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                                    }}
+                                >
+                                    <Users size={16} /> Busco Trabajo
+                                </button>
+                            </div>
+                            
+                            <select
+                                value={newJobTrade}
+                                onChange={(e) => setNewJobTrade(e.target.value)}
+                                style={{ width: '100%', padding: '12px', fontSize: '14px', marginBottom: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: newJobTrade ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                            >
+                                <option value="" disabled>Selecciona el oficio (Obligatorio)...</option>
+                                {trades.map(trade => (
+                                    <option key={trade.id} value={trade.id}>{t(trade.tkey) || trade.name}</option>
+                                ))}
+                            </select>
+
+                            <select
+                                value={newJobLocation}
+                                onChange={(e) => setNewJobLocation(e.target.value)}
+                                style={{ width: '100%', padding: '12px', fontSize: '14px', marginBottom: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: newJobLocation ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                            >
+                                <option value="" disabled>Ubicación (Obligatorio)...</option>
+                                {[
+                                    "Álava", "Albacete", "Alicante", "Almería", "Asturias", "Ávila", "Badajoz", "Barcelona", "Burgos", "Cáceres", "Cádiz", "Cantabria", "Castellón", "Ciudad Real", "Córdoba", "Cuenca", "Girona", "Granada", "Guadalajara", "Gipuzkoa", "Huelva", "Huesca", "Illes Balears", "Jaén", "A Coruña", "La Rioja", "Las Palmas", "León", "Lleida", "Lugo", "Madrid", "Málaga", "Murcia", "Navarra", "Ourense", "Palencia", "Pontevedra", "Salamanca", "Segovia", "Sevilla", "Soria", "Tarragona", "Santa Cruz de Tenerife", "Teruel", "Toledo", "Valencia", "Valladolid", "Bizkaia", "Zamora", "Zaragoza", "Ceuta", "Melilla"
+                                ].map(prov => (
+                                    <option key={prov} value={prov}>{prov}</option>
+                                ))}
+                            </select>
+
+
+
+                            <textarea
+                                value={newJobContent}
+                                onChange={(e) => setNewJobContent(e.target.value)}
+                                placeholder={newJobType === 'seek_worker' ? "¿Qué perfil exacto necesitas para tu obra/empresa?" : "¿Cuál es tu especialidad y qué trabajo buscas?"}
+                                style={{ minHeight: '80px', padding: '12px', fontSize: '14px', marginBottom: '12px', width: '100%', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                            />
+                            
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handlePostJob}
+                                    disabled={publishingJob || !newJobContent.trim() || !newJobTrade || !newJobLocation.trim()}
+                                    style={{ padding: '10px 24px', fontSize: '14px', opacity: (publishingJob || !newJobContent.trim() || !newJobTrade || !newJobLocation.trim()) ? 0.6 : 1 }}
+                                >
+                                    <Send size={16} /> {publishingJob ? 'Publicando...' : 'Publicar Anuncio'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Posts */}
                 <div style={{ padding: '16px 20px' }}>
-                    {/* Empty state when filter has no matches */}
-                    {activeFilter !== 'all' && posts.filter(p => p.tagged_trades && p.tagged_trades.includes(activeFilter)).length === 0 && (
+                    {activeTab === 'general' ? (
+                        <>
+                            {/* Empty state when filter has no matches */}
+                            {activeFilter !== 'all' && posts.filter(p => p.tagged_trades && p.tagged_trades.includes(activeFilter)).length === 0 && (
                         <div style={{
                             textAlign: 'center',
                             padding: '40px 20px',
@@ -1204,6 +1523,151 @@ const Community = () => {
                             </div>
                         </motion.div>
                     ))}
+                        </>
+                    ) : (
+                        /* Render Job Offers */
+                        <>
+                            {jobOffers.length === 0 && !jobsLoading && (
+                                <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                                    <Briefcase size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                                    <p>No hay ofertas de empleo todavía.</p>
+                                </div>
+                            )}
+                            {jobOffers.map((job, i) => (
+                                <motion.div
+                                    key={job.id}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: i * 0.05 }}
+                                    className="card"
+                                    style={{ marginBottom: '12px', padding: '16px', borderLeft: job.offer_type === 'seek_worker' ? '4px solid var(--accent)' : '4px solid #10b981' }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                                        <div
+                                            onClick={() => job.user_id && navigate(`/professional/${job.user_id}`)}
+                                            style={{
+                                                width: '40px', height: '40px', borderRadius: '50%',
+                                                background: 'var(--bg-secondary)',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: '16px', fontWeight: '700', color: 'var(--accent)',
+                                                border: '1px solid var(--border)',
+                                                cursor: job.user_id ? 'pointer' : 'default'
+                                            }}>
+                                            {job.avatar}
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <p
+                                                onClick={() => job.user_id && navigate(`/professional/${job.user_id}`)}
+                                                style={{ fontSize: '14px', fontWeight: '600', cursor: job.user_id ? 'pointer' : 'default' }}
+                                            >
+                                                {job.user}
+                                            </p>
+                                            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{job.time}</p>
+                                        </div>
+                                        <span style={{ 
+                                            background: job.offer_type === 'seek_worker' ? 'var(--accent-soft)' : '#10b98120',
+                                            color: job.offer_type === 'seek_worker' ? 'var(--accent)' : '#10b981',
+                                            padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700',
+                                            display: 'flex', alignItems: 'center', gap: '4px'
+                                        }}>
+                                            {job.offer_type === 'seek_worker' ? <Briefcase size={12} /> : <Users size={12} />}
+                                            {job.offer_type === 'seek_worker' ? 'Busca Trabajador' : 'Busca Trabajo'}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                                        {job.trade && (
+                                            <span style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                                background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
+                                                padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
+                                            }}>
+                                                <Briefcase size={12} /> {(() => {
+                                                    const trade = trades.find(t_item => t_item.id === job.trade);
+                                                    return trade ? (t(trade.tkey) || trade.name) : job.trade;
+                                                })()}
+                                            </span>
+                                        )}
+                                        {job.location && (
+                                            <span style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                                                background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
+                                                padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
+                                            }}>
+                                                <MapPin size={12} /> {job.location}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--text-secondary)', marginBottom: '14px', whiteSpace: 'pre-wrap' }}>
+                                        {job.content}
+                                    </p>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                                        <button
+                                            onClick={async () => {
+                                                try {
+                                                    const { data: { session } } = await supabase.auth.getSession();
+                                                    const user = session?.user;
+                                                    if (!user) {
+                                                        showToast('Debes iniciar sesión para responder.');
+                                                        return;
+                                                    }
+                                                    if (job.user_id === user.id) {
+                                                        showToast('No puedes responder a tu propio anuncio.');
+                                                        return;
+                                                    }
+
+                                                    const { data: myConvs } = await supabase.from('conversation_participants').select('conversation_id').eq('user_id', user.id);
+                                                    const myConvIds = (myConvs || []).map(c => c.conversation_id);
+                                                    let existingConvId = null;
+                                                    if (myConvIds.length > 0) {
+                                                        const { data: shared } = await supabase.from('conversation_participants').select('conversation_id').eq('user_id', job.user_id).in('conversation_id', myConvIds).limit(1).maybeSingle();
+                                                        if (shared) existingConvId = shared.conversation_id;
+                                                    }
+
+                                                    if (existingConvId) {
+                                                        navigate(`/chat/${existingConvId}`);
+                                                    } else {
+                                                        const { data: conv, error: createErr } = await supabase.from('conversations').insert({
+                                                            original_post_content: job.content.slice(0, 200),
+                                                            poster_name: job.user,
+                                                            last_message: 'Respuesta a oferta de empleo',
+                                                            last_message_at: new Date().toISOString()
+                                                        }).select().single();
+
+                                                        if (createErr) throw createErr;
+                                                        
+                                                        if (conv) {
+                                                            await supabase.from('conversation_participants').insert([
+                                                                { conversation_id: conv.id, user_id: user.id },
+                                                                { conversation_id: conv.id, user_id: job.user_id },
+                                                            ]);
+                                                            await supabase.from('messages').insert({
+                                                                conversation_id: conv.id,
+                                                                sender_id: user.id,
+                                                                content: `Hola! Te escribo por tu anuncio: "${job.content.slice(0, 60)}..."`
+                                                            });
+                                                            navigate(`/chat/${conv.id}`);
+                                                        }
+                                                    }
+                                                } catch (e) {
+                                                    console.error(e);
+                                                    showToast('Error al iniciar conversación.');
+                                                }
+                                            }}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: '6px',
+                                                background: 'var(--accent-soft)', border: 'none',
+                                                cursor: 'pointer', color: 'var(--accent)',
+                                                fontSize: '12px', fontFamily: 'Inter', fontWeight: '600',
+                                                padding: '6px 12px', borderRadius: '16px'
+                                            }}
+                                        >
+                                            <Reply size={14} /> Responder
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </>
+                    )}
                 </div>
             </div>
 
